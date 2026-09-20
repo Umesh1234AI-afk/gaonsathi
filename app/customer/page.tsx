@@ -506,19 +506,29 @@ export default function CustomerPage() {
   // It is only removed from this customer's browser list.
   // --------------------------------------------------
 
-  function removeRequestFromMyList(requestId: string | number) {
+  async function removeRequestFromMyList(requestId: string | number) {
     const ok = window.confirm(
-      "Kya aap is request ko apni Customer list se hatana chahte hain? Database record delete nahi hoga."
+      "⚠️ Kya aap is request ko permanently delete karna chahte hain?\n\nYe request Customer aur Shopkeeper dono ki list se hat jayegi."
     );
 
     if (!ok) return;
 
     const id = String(requestId);
 
+    const { error } = await supabase
+      .from("customer_requests")
+      .delete()
+      .eq("id", requestId);
+
+    if (error) {
+      console.error("DELETE REQUEST ERROR:", error);
+      setMessage(`❌ Request delete nahi hui: ${error.message}`);
+      return;
+    }
+
     try {
       const raw = localStorage.getItem("gaonsathi_request_ids");
       const ids: (string | number)[] = raw ? JSON.parse(raw) : [];
-
       const updatedIds = ids.filter((item) => String(item) !== id);
 
       localStorage.setItem(
@@ -533,7 +543,9 @@ export default function CustomerPage() {
       prev.filter((item) => String(item.id) !== id)
     );
 
-    setMessage("✅ Request Customer list se hata di gayi.");
+    setMessage(
+      "✅ Request Customer aur Shopkeeper dono ki list se delete ho gayi."
+    );
   }
 
   // --------------------------------------------------

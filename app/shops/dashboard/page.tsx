@@ -446,6 +446,34 @@ export default function ShopDashboard() {
 
     setMessage("Product delete ho gaya.");
   }
+  async function deleteCustomerRequest(requestId: number | string) {
+  const ok = window.confirm(
+    "⚠️ Kya aap is request ko permanently delete karna chahte hain?\n\nYe request Customer aur Shopkeeper dono ki list se hat jayegi."
+  );
+
+  if (!ok) return;
+
+  const { error } = await supabase
+    .from("customer_requests")
+    .delete()
+    .eq("id", requestId);
+
+  if (error) {
+    console.error("DELETE CUSTOMER REQUEST ERROR:", error);
+    setMessage(`❌ Request delete nahi hui: ${error.message}`);
+    return;
+  }
+
+  setRequests((prev) =>
+    prev.filter(
+      (item) => String(item.id) !== String(requestId)
+    )
+  );
+
+  setMessage(
+    "✅ Request Customer aur Shopkeeper dono ki list se delete ho gayi."
+  );
+}
 
   // --------------------------------------------------
   // SAVE SETTINGS
@@ -1651,12 +1679,24 @@ export default function ShopDashboard() {
                       )}
                     </div>
 
-                    <span className="w-fit rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold">
-                      {STATUS_LABELS[
-                        request.status
-                      ] ||
-                        request.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="w-fit rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold">
+                        {STATUS_LABELS[
+                          request.status
+                        ] ||
+                          request.status}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          deleteCustomerRequest(request.id)
+                        }
+                        className="rounded-lg bg-red-50 px-3 py-1 text-xs font-semibold text-red-600"
+                      >
+                        🗑️ Hatao
+                      </button>
+                    </div>
                   </div>
 
                   {/* ESTIMATED */}
