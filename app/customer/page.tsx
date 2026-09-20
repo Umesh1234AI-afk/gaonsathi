@@ -25,8 +25,6 @@ type Shop = {
   delivery_time: string | null;
   delivery_fee: number | null;
   pickup_available: boolean;
-  latitude: number | null;
-  longitude: number | null;
   products?: Product[];
 };
 
@@ -124,9 +122,7 @@ export default function CustomerPage() {
           home_delivery,
           delivery_time,
           delivery_fee,
-          pickup_available,
-          latitude,
-          longitude
+          pickup_available
         `)
         .eq("status", "approved")
         .eq("is_active", true)
@@ -506,43 +502,38 @@ export default function CustomerPage() {
 
   // --------------------------------------------------
   // REMOVE REQUEST FROM CUSTOMER LIST
+  // NOTE: Database order/request is NOT deleted.
+  // It is only removed from this customer's browser list.
   // --------------------------------------------------
 
   function removeRequestFromMyList(requestId: string | number) {
     const ok = window.confirm(
-      "Is request ko aapki Customer list se hata dein? Order/database record delete nahi hoga."
+      "Kya aap is request ko apni Customer list se hatana chahte hain? Database record delete nahi hoga."
     );
 
     if (!ok) return;
 
+    const id = String(requestId);
+
     try {
-      const savedIdsRaw = localStorage.getItem("gaonsathi_request_ids");
-      let savedIds: (string | number)[] = [];
+      const raw = localStorage.getItem("gaonsathi_request_ids");
+      const ids: (string | number)[] = raw ? JSON.parse(raw) : [];
 
-      try {
-        savedIds = savedIdsRaw ? JSON.parse(savedIdsRaw) : [];
-      } catch {
-        savedIds = [];
-      }
-
-      const updatedIds = savedIds.filter(
-        (id) => String(id) !== String(requestId)
-      );
+      const updatedIds = ids.filter((item) => String(item) !== id);
 
       localStorage.setItem(
         "gaonsathi_request_ids",
         JSON.stringify(updatedIds)
       );
-
-      setRequests((current) =>
-        current.filter((request) => String(request.id) !== String(requestId))
-      );
-
-      setMessage("Request aapki list se hata di gayi hai.");
     } catch (error) {
-      console.error("REMOVE REQUEST ERROR:", error);
-      setMessage("Request list se nahi hat paayi.");
+      console.error("REMOVE REQUEST LOCAL STORAGE ERROR:", error);
     }
+
+    setRequests((prev) =>
+      prev.filter((item) => String(item.id) !== id)
+    );
+
+    setMessage("✅ Request Customer list se hata di gayi.");
   }
 
   // --------------------------------------------------
@@ -681,78 +672,6 @@ export default function CustomerPage() {
   }
 
   // --------------------------------------------------
-  // SHOP LOCATION / MAP
-  // --------------------------------------------------
-
-  function hasShopLocation(shop: Shop | null | undefined) {
-    return (
-      shop?.latitude !== null &&
-      shop?.latitude !== undefined &&
-      shop?.longitude !== null &&
-      shop?.longitude !== undefined &&
-      Number.isFinite(Number(shop.latitude)) &&
-      Number.isFinite(Number(shop.longitude))
-    );
-  }
-
-  function openShopMap(shop: Shop) {
-    if (!hasShopLocation(shop)) {
-      setMessage("📍 Is shop ki exact map location abhi save nahi hai.");
-      return;
-    }
-
-    const lat = Number(shop.latitude);
-    const lng = Number(shop.longitude);
-
-    window.open(
-      `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
-      "_blank"
-    );
-  }
-
-  function getDirections(shop: Shop) {
-    if (!hasShopLocation(shop)) {
-      setMessage("📍 Is shop ki exact map location abhi save nahi hai.");
-      return;
-    }
-
-    const destination = `${Number(shop.latitude)},${Number(shop.longitude)}`;
-
-    if (!navigator.geolocation) {
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`,
-        "_blank"
-      );
-      return;
-    }
-
-    setMessage("📍 Aapki current location lekar route open kar raha hoon...");
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const origin = `${position.coords.latitude},${position.coords.longitude}`;
-        window.open(
-          `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving`,
-          "_blank"
-        );
-        setMessage("");
-      },
-      () => {
-        window.open(
-          `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`,
-          "_blank"
-        );
-        setMessage("📍 Route shop ki location se open hua hai.");
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 30000,
-      }
-    );
-  }
-
-  // --------------------------------------------------
   // RENDER
   // --------------------------------------------------
 
@@ -856,7 +775,7 @@ export default function CustomerPage() {
                         )}
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex flex-col items-end gap-2">
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-semibold ${
                             STATUS_COLORS[request.status] ||
@@ -868,8 +787,10 @@ export default function CustomerPage() {
 
                         <button
                           type="button"
-                          onClick={() => removeRequestFromMyList(request.id)}
-                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-100"
+                          onClick={() =>
+                            removeRequestFromMyList(request.id)
+                          }
+                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-600"
                         >
                           🗑️ Hatao
                         </button>
@@ -1103,31 +1024,6 @@ export default function CustomerPage() {
                         {shop.pickup_available && (
                           <p>🛍️ Pickup Available</p>
                         )}
-
-                        {hasShopLocation(shop) && (
-                          <div className="mt-3 overflow-hidden rounded-xl border bg-gray-50">
-                            <iframe
-                              title={`${shop.name} map`}
-                              src={`https://www.google.com/maps?q=${Number(shop.latitude)},${Number(shop.longitude)}&z=16&output=embed`}
-                              className="h-40 w-full border-0"
-                              loading="lazy"
-                            />
-                            <div className="grid grid-cols-2 gap-2 p-2">
-                              <button
-                                onClick={() => openShopMap(shop)}
-                                className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-sm"
-                              >
-                                🗺️ Map
-                              </button>
-                              <button
-                                onClick={() => getDirections(shop)}
-                                className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white"
-                              >
-                                🧭 Get Directions
-                              </button>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -1242,33 +1138,6 @@ export default function CustomerPage() {
                       </p>
                     )}
                   </div>
-
-                  {/* SHOP LOCATION */}
-
-                  {hasShopLocation(shop) && (
-                    <div className="mt-4 overflow-hidden rounded-xl border bg-gray-50">
-                      <iframe
-                        title={`${shop.name} map preview`}
-                        src={`https://www.google.com/maps?q=${Number(shop.latitude)},${Number(shop.longitude)}&z=15&output=embed`}
-                        className="h-36 w-full border-0"
-                        loading="lazy"
-                      />
-                      <div className="grid grid-cols-2 gap-2 p-2">
-                        <button
-                          onClick={() => openShopMap(shop)}
-                          className="rounded-lg bg-white px-3 py-2 text-xs font-semibold shadow-sm"
-                        >
-                          🗺️ Map
-                        </button>
-                        <button
-                          onClick={() => getDirections(shop)}
-                          className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white"
-                        >
-                          🧭 Directions
-                        </button>
-                      </div>
-                    </div>
-                  )}
 
                   {/* SHOP BUTTON */}
 
