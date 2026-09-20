@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../utils/supabase/client";
 
@@ -10,12 +10,31 @@ export default function ShopkeeperLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [message, setMessage] = useState("");
+
+  // Already logged in hai to direct dashboard
+  useEffect(() => {
+    const checkSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.user) {
+        router.replace("/shops/dashboard");
+        return;
+      }
+
+      setCheckingSession(false);
+    };
+
+    checkSession();
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       setMessage("⚠️ Email aur password dono fill karein.");
       return;
     }
@@ -24,47 +43,62 @@ export default function ShopkeeperLogin() {
     setMessage("");
 
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password,
     });
 
-    setLoading(false);
-
     if (error) {
-      console.error(error);
+      console.error("LOGIN ERROR:", error);
+      setLoading(false);
       setMessage("❌ Login failed. Email ya password check karein.");
       return;
     }
 
-    setMessage("✅ Login successful!");
+    setMessage("✅ Login successful! Dashboard open ho raha hai...");
 
+    // Supabase session save karega
     setTimeout(() => {
-      router.push("/shop/register");
-    }, 700);
+      router.replace("/shop/dashboard");
+    }, 400);
   };
 
+  if (checkingSession) {
+    return (
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
+          <div className="text-3xl mb-3">⏳</div>
+          <p className="font-semibold text-gray-800">
+            Session check ho raha hai...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 px-4 py-10">
+    <main className="min-h-screen bg-gray-50 px-4 py-8">
       <div className="max-w-md mx-auto">
 
-        <div className="text-center mb-8">
+        {/* Header */}
+        <div className="text-center mb-7">
           <div className="text-5xl mb-3">🏪</div>
 
-          <h1 className="text-3xl font-bold text-green-800">
+          <h1 className="text-2xl font-bold text-gray-900">
             Shopkeeper Login
           </h1>
 
-          <p className="text-gray-600 mt-2">
-            Apni shop manage karne ke liye login karein
+          <p className="text-gray-500 mt-2">
+            Apni dukaan ka dashboard kholen
           </p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-lg p-6">
+        {/* Login Card */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-4">
 
             <div>
-              <label className="block font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Email
               </label>
 
@@ -72,13 +106,14 @@ export default function ShopkeeperLogin() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="shopkeeper@email.com"
-                className="w-full border border-gray-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="shopkeeper@gmail.com"
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:ring-2 focus:ring-green-500"
+                autoComplete="email"
               />
             </div>
 
             <div>
-              <label className="block font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Password
               </label>
 
@@ -87,12 +122,13 @@ export default function ShopkeeperLogin() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
-                className="w-full border border-gray-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:ring-2 focus:ring-green-500"
+                autoComplete="current-password"
               />
             </div>
 
             {message && (
-              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+              <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-sm">
                 {message}
               </div>
             )}
@@ -100,26 +136,40 @@ export default function ShopkeeperLogin() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
+              className="w-full rounded-xl bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold py-3.5 transition"
             >
-              {loading ? "Login ho raha hai..." : "Login"}
+              {loading ? "Login ho raha hai..." : "Login Karein"}
             </button>
-
           </form>
 
-          <div className="text-center mt-6 text-sm text-gray-600">
-            Shopkeeper account nahi hai?
+          {/* Register */}
+          <div className="mt-6 pt-5 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-500 mb-3">
+              Nayi dukaan register karni hai?
+            </p>
+
+            <button
+              type="button"
+              onClick={() => router.push("/shop/register")}
+              className="w-full rounded-xl border-2 border-green-600 text-green-700 font-bold py-3 hover:bg-green-50"
+            >
+              🏪 Apni Shop Register Karein
+            </button>
           </div>
 
+          {/* Home */}
           <button
-            onClick={() => router.push("/shop/register")}
-            className="w-full mt-2 border-2 border-green-600 text-green-700 font-semibold py-3 rounded-xl hover:bg-green-50"
+            type="button"
+            onClick={() => router.push("/")}
+            className="w-full mt-4 text-sm text-gray-500 hover:text-green-700"
           >
-            Apni Shop Register Karein
+            ← Home par wapas
           </button>
-
         </div>
 
+        <p className="text-center text-xs text-gray-400 mt-5">
+          Login ke baad aapki session active rahegi.
+        </p>
       </div>
     </main>
   );

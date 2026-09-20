@@ -26,34 +26,88 @@ type Shop = {
   pickup_available: boolean;
 };
 
-type CustomerRequest = {
+type DeliveryBoy = {
   id: number;
+  shop_id: number;
+  name: string;
+  phone: string | null;
+  is_active: boolean;
+};
+
+type CustomerRequest = {
+  id: number | string;
   requirement: string;
   status: string;
   created_at: string;
   shop_id: number;
+
+  product_id: number | null;
+  product_name: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  estimated_amount: number | null;
+
+  order_amount: number | null;
+
+  payment_method: string | null;
+  payment_status: string | null;
+  payment_reference: string | null;
+
+  customer_confirmed_at: string | null;
+  shopkeeper_confirmed_at: string | null;
+  paid_at: string | null;
+
+  delivery_boy_id: number | null;
+  delivery_boy_name: string | null;
+  delivery_boy_phone: string | null;
+  delivery_status: string | null;
+  delivery_assigned_at: string | null;
+  out_for_delivery_at: string | null;
+
+  cash_amount: number | null;
+  cash_status: string | null;
+  cash_received_at: string | null;
+  cash_received_by: string | null;
+  cash_handed_to_shop: boolean;
+  cash_handed_to_shop_at: string | null;
+
+  delivered_at: string | null;
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  available: "Available",
+  customer_confirmed: "Customer Confirmed",
+  order_confirmed: "Order Confirmed",
+  preparing: "Preparing",
+  packed: "Packed",
+  handed_to_delivery: "Delivery Boy Ko Diya",
+  out_for_delivery: "Out for Delivery",
+  delivered: "Delivered",
 };
 
 export default function ShopDashboard() {
   const [shop, setShop] = useState<Shop | null>(null);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [requests, setRequests] = useState<CustomerRequest[]>([]);
+  const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [loadingRequests, setLoadingRequests] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
 
   const [message, setMessage] = useState("");
 
-  const [form, setForm] = useState({
+  const [productForm, setProductForm] = useState({
     name: "",
     category: "",
     price: "",
   });
 
   const [settings, setSettings] = useState({
-    payment_method: "Cash",
+    payment_method: "cash",
     upi_id: "",
     home_delivery: false,
     delivery_time: "",
@@ -61,12 +115,24 @@ export default function ShopDashboard() {
     pickup_available: true,
   });
 
-  // -----------------------------
+  const [orderAmounts, setOrderAmounts] = useState<
+    Record<string, string>
+  >({});
+
+  const [selectedDeliveryBoys, setSelectedDeliveryBoys] =
+    useState<Record<string, string>>({});
+
+  const [deliveryBoyForm, setDeliveryBoyForm] = useState({
+    name: "",
+    phone: "",
+  });
+
+  // --------------------------------------------------
   // LOAD SHOP
-  // -----------------------------
-  const loadShop = async () => {
+  // --------------------------------------------------
+
+  async function loadShop() {
     setLoading(true);
-    setMessage("");
 
     try {
       const {
@@ -75,7 +141,7 @@ export default function ShopDashboard() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        setMessage("❌ Please login first.");
+        setMessage("Please login first.");
         setLoading(false);
         return;
       }
@@ -101,116 +167,209 @@ export default function ShopDashboard() {
         .eq("is_active", true)
         .single();
 
-      if (shopError) {
-        console.error("Shop Error:", shopError);
+      if (shopError || !shopData) {
+        console.error("SHOP ERROR:", shopError);
         setMessage(
-          "❌ Approved shop nahi mili. Please admin approval check karein."
+          "Approved shop nahi mili. Please shop approval check karein."
         );
         setLoading(false);
         return;
       }
 
-      setShop(shopData);
+      const currentShop = shopData as Shop;
+
+      setShop(currentShop);
 
       setSettings({
-        payment_method: shopData.payment_method || "Cash",
-        upi_id: shopData.upi_id || "",
-        home_delivery: shopData.home_delivery ?? false,
-        delivery_time: shopData.delivery_time || "",
-        delivery_fee: String(shopData.delivery_fee ?? 0),
-        pickup_available: shopData.pickup_available ?? true,
+        payment_method:
+          currentShop.payment_method || "cash",
+        upi_id: currentShop.upi_id || "",
+        home_delivery:
+          currentShop.home_delivery ?? false,
+        delivery_time:
+          currentShop.delivery_time || "",
+        delivery_fee: String(
+          currentShop.delivery_fee ?? 0
+        ),
+        pickup_available:
+          currentShop.pickup_available ?? true,
       });
 
       await Promise.all([
-        loadProducts(shopData.id),
-        loadRequests(shopData.id),
+        loadProducts(currentShop.id),
+        loadRequests(currentShop.id),
+        loadDeliveryBoys(currentShop.id),
       ]);
     } catch (error) {
-      console.error("Load Shop Error:", error);
-      setMessage("❌ Dashboard load nahi ho paya.");
+      console.error(error);
+      setMessage("Dashboard load error.");
     }
 
     setLoading(false);
-  };
+  }
 
-  // -----------------------------
+  // --------------------------------------------------
   // LOAD PRODUCTS
-  // -----------------------------
-  const loadProducts = async (shopId: number) => {
+  // --------------------------------------------------
+
+  async function loadProducts(shopId: number) {
     const { data, error } = await supabase
       .from("products")
-      .select("id, name, category, price, available")
+      .select(`
+        id,
+        name,
+        category,
+        price,
+        available
+      `)
       .eq("shop_id", shopId)
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Products Error:", error);
+      console.error("PRODUCT ERROR:", error);
       return;
     }
 
-    setProducts(data || []);
-  };
+    setProducts((data || []) as Product[]);
+  }
 
-  // -----------------------------
-  // LOAD CUSTOMER REQUESTS
-  // -----------------------------
-  const loadRequests = async (shopId: number) => {
+  // --------------------------------------------------
+  // LOAD REQUESTS
+  // --------------------------------------------------
+
+  async function loadRequests(shopId: number) {
     setLoadingRequests(true);
 
     const { data, error } = await supabase
       .from("customer_requests")
-      .select("id, requirement, status, created_at, shop_id")
+      .select(`
+        id,
+        requirement,
+        status,
+        created_at,
+        shop_id,
+
+        product_id,
+        product_name,
+        quantity,
+        unit_price,
+        estimated_amount,
+
+        order_amount,
+
+        payment_method,
+        payment_status,
+        payment_reference,
+
+        customer_confirmed_at,
+        shopkeeper_confirmed_at,
+        paid_at,
+
+        delivery_boy_id,
+        delivery_boy_name,
+        delivery_boy_phone,
+        delivery_status,
+        delivery_assigned_at,
+        out_for_delivery_at,
+
+        cash_amount,
+        cash_status,
+        cash_received_at,
+        cash_received_by,
+        cash_handed_to_shop,
+        cash_handed_to_shop_at,
+
+        delivered_at
+      `)
       .eq("shop_id", shopId)
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Requests Error:", error);
+      console.error("REQUEST LOAD ERROR:", error);
+      setMessage(`❌ Requests load error: ${error.message}`);
       setLoadingRequests(false);
       return;
     }
 
-    setRequests(data || []);
+    setRequests((data || []) as CustomerRequest[]);
     setLoadingRequests(false);
-  };
+  }
+
+  // --------------------------------------------------
+  // LOAD DELIVERY BOYS
+  // --------------------------------------------------
+
+  async function loadDeliveryBoys(shopId: number) {
+    const { data, error } = await supabase
+      .from("delivery_boys")
+      .select(`
+        id,
+        shop_id,
+        name,
+        phone,
+        is_active
+      `)
+      .eq("shop_id", shopId)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("DELIVERY BOY ERROR:", error);
+      return;
+    }
+
+    setDeliveryBoys((data || []) as DeliveryBoy[]);
+  }
+
+  // --------------------------------------------------
+  // INITIAL
+  // --------------------------------------------------
 
   useEffect(() => {
     loadShop();
   }, []);
 
-  // -----------------------------
+  // --------------------------------------------------
   // ADD PRODUCT
-  // -----------------------------
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // --------------------------------------------------
 
+  async function addProduct() {
     if (!shop) return;
 
-    if (!form.name.trim()) {
-      alert("Please product name enter karein.");
+    const name = productForm.name.trim();
+    const category = productForm.category.trim();
+    const price = Number(productForm.price);
+
+    if (!name) {
+      setMessage("Product name likhiye.");
+      return;
+    }
+
+    if (Number.isNaN(price) || price < 0) {
+      setMessage("Valid price enter karein.");
       return;
     }
 
     setSaving(true);
     setMessage("");
 
-    const { error } = await supabase.from("products").insert([
-      {
+    const { error } = await supabase
+      .from("products")
+      .insert({
         shop_id: shop.id,
-        name: form.name.trim(),
-        category: form.category.trim() || null,
-        price: form.price ? Number(form.price) : null,
+        name,
+        category: category || null,
+        price,
         available: true,
-      },
-    ]);
+      });
 
     if (error) {
-      console.error("Product Insert Error:", error);
+      console.error("ADD PRODUCT ERROR:", error);
       setMessage(`❌ Product add nahi hua: ${error.message}`);
       setSaving(false);
       return;
     }
 
-    setForm({
+    setProductForm({
       name: "",
       category: "",
       price: "",
@@ -220,40 +379,44 @@ export default function ShopDashboard() {
 
     setMessage("✅ Product successfully add ho gaya.");
     setSaving(false);
-  };
+  }
 
-  // -----------------------------
-  // TOGGLE PRODUCT AVAILABILITY
-  // -----------------------------
-  const toggleAvailability = async (
-    productId: number,
-    currentValue: boolean
-  ) => {
+  // --------------------------------------------------
+  // TOGGLE PRODUCT
+  // --------------------------------------------------
+
+  async function toggleProduct(
+    product: Product
+  ) {
     const { error } = await supabase
       .from("products")
-      .update({ available: !currentValue })
-      .eq("id", productId);
+      .update({
+        available: !product.available,
+      })
+      .eq("id", product.id);
 
     if (error) {
-      console.error("Availability Error:", error);
-      alert(`❌ Update nahi hua: ${error.message}`);
+      setMessage(`❌ ${error.message}`);
       return;
     }
 
     if (shop) {
       await loadProducts(shop.id);
     }
-  };
+  }
 
-  // -----------------------------
+  // --------------------------------------------------
   // DELETE PRODUCT
-  // -----------------------------
-  const deleteProduct = async (productId: number) => {
-    const confirmed = window.confirm(
+  // --------------------------------------------------
+
+  async function deleteProduct(
+    productId: number
+  ) {
+    const ok = window.confirm(
       "Kya aap ye product delete karna chahte hain?"
     );
 
-    if (!confirmed) return;
+    if (!ok) return;
 
     const { error } = await supabase
       .from("products")
@@ -261,8 +424,7 @@ export default function ShopDashboard() {
       .eq("id", productId);
 
     if (error) {
-      console.error("Delete Product Error:", error);
-      alert(`❌ Product delete nahi hua: ${error.message}`);
+      setMessage(`❌ ${error.message}`);
       return;
     }
 
@@ -270,195 +432,776 @@ export default function ShopDashboard() {
       await loadProducts(shop.id);
     }
 
-    setMessage("✅ Product delete ho gaya.");
-  };
+    setMessage("Product delete ho gaya.");
+  }
 
-  // -----------------------------
-  // UPDATE CUSTOMER REQUEST STATUS
-  // -----------------------------
-  const updateRequestStatus = async (
-    requestId: number,
-    status: string
-  ) => {
-    const { error } = await supabase
-      .from("customer_requests")
-      .update({ status })
-      .eq("id", requestId);
+  // --------------------------------------------------
+  // SAVE SETTINGS
+  // --------------------------------------------------
 
-    if (error) {
-      console.error("Request Status Error:", error);
-      alert(`❌ Status update nahi hua: ${error.message}`);
+  async function saveSettings() {
+    if (!shop) return;
+
+    const deliveryFee = Number(
+      settings.delivery_fee || 0
+    );
+
+    if (
+      settings.home_delivery &&
+      (Number.isNaN(deliveryFee) || deliveryFee < 0)
+    ) {
+      setMessage("Valid delivery fee enter karein.");
       return;
     }
-
-    setRequests((prev) =>
-      prev.map((request) =>
-        request.id === requestId
-          ? { ...request, status }
-          : request
-      )
-    );
-  };
-
-  // -----------------------------
-  // SAVE SHOP SETTINGS
-  // -----------------------------
-  const saveSettings = async () => {
-    if (!shop) return;
 
     setSavingSettings(true);
     setMessage("");
 
-    const deliveryFee = Number(settings.delivery_fee);
-
-    if (settings.home_delivery && Number.isNaN(deliveryFee)) {
-      setMessage("❌ Delivery fee sahi enter karein.");
-      setSavingSettings(false);
-      return;
-    }
-
     const { data, error } = await supabase
       .from("shops")
       .update({
-        payment_method: settings.payment_method,
+        payment_method:
+          settings.payment_method,
         upi_id:
-          settings.payment_method === "Cash"
+          settings.payment_method === "cash"
             ? null
             : settings.upi_id.trim() || null,
-        home_delivery: settings.home_delivery,
-        delivery_time: settings.home_delivery
-          ? settings.delivery_time.trim() || null
-          : null,
-        delivery_fee: settings.home_delivery ? deliveryFee : 0,
-        pickup_available: settings.pickup_available,
+
+        home_delivery:
+          settings.home_delivery,
+
+        delivery_time:
+          settings.home_delivery
+            ? settings.delivery_time.trim() || null
+            : null,
+
+        delivery_fee:
+          settings.home_delivery
+            ? deliveryFee
+            : 0,
+
+        pickup_available:
+          settings.pickup_available,
       })
       .eq("id", shop.id)
-      .select()
+      .select(`
+        id,
+        name,
+        owner_name,
+        phone,
+        village,
+        address,
+        payment_method,
+        upi_id,
+        home_delivery,
+        delivery_time,
+        delivery_fee,
+        pickup_available
+      `)
       .single();
 
     if (error) {
-      console.error("Settings Save Error:", error);
-      setMessage(`❌ Settings save nahi hui: ${error.message}`);
+      console.error("SETTINGS ERROR:", error);
+      setMessage(
+        `❌ Settings save nahi hui: ${error.message}`
+      );
       setSavingSettings(false);
       return;
     }
 
-    setShop((prev) =>
-      prev
-        ? {
-            ...prev,
-            payment_method: data.payment_method,
-            upi_id: data.upi_id,
-            home_delivery: data.home_delivery,
-            delivery_time: data.delivery_time,
-            delivery_fee: data.delivery_fee,
-            pickup_available: data.pickup_available,
-          }
-        : prev
+    setShop(data as Shop);
+
+    setSettings({
+      payment_method:
+        data.payment_method || "cash",
+      upi_id: data.upi_id || "",
+      home_delivery:
+        data.home_delivery ?? false,
+      delivery_time:
+        data.delivery_time || "",
+      delivery_fee: String(
+        data.delivery_fee ?? 0
+      ),
+      pickup_available:
+        data.pickup_available ?? true,
+    });
+
+    setMessage("✅ Settings successfully saved.");
+    setSavingSettings(false);
+  }
+
+  // --------------------------------------------------
+  // ADD DELIVERY BOY
+  // --------------------------------------------------
+
+  async function addDeliveryBoy() {
+    if (!shop) {
+      setMessage("❌ Shop information nahi mili.");
+      return;
+    }
+
+    const name = deliveryBoyForm.name.trim();
+    const phone = deliveryBoyForm.phone.trim();
+
+    if (!name) {
+      setMessage("❌ Delivery Boy ka naam likhiye.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    const payload = {
+      shop_id: Number(shop.id),
+      name,
+      phone: phone || null,
+      is_active: true,
+    };
+
+    console.log("ADDING DELIVERY BOY:", payload);
+
+    const { data, error } = await supabase
+      .from("delivery_boys")
+      .insert(payload)
+      .select("id, shop_id, name, phone, is_active")
+      .single();
+
+    if (error) {
+      console.error("ADD DELIVERY BOY ERROR MESSAGE:", error.message);
+      console.error("ADD DELIVERY BOY ERROR DETAILS:", error.details);
+      console.error("ADD DELIVERY BOY ERROR HINT:", error.hint);
+      console.error("ADD DELIVERY BOY ERROR CODE:", error.code);
+
+      setMessage(
+        `❌ Delivery Boy add nahi hua: ${
+          error.message || "Database error"
+        }`
+      );
+
+      setSaving(false);
+      return;
+    }
+
+    console.log("DELIVERY BOY ADDED:", data);
+
+    setDeliveryBoyForm({
+      name: "",
+      phone: "",
+    });
+
+    await loadDeliveryBoys(shop.id);
+
+    setMessage("✅ Delivery Boy successfully add ho gaya.");
+
+    setSaving(false);
+  }
+
+  // --------------------------------------------------
+  // TOGGLE DELIVERY BOY
+  // --------------------------------------------------
+
+  async function toggleDeliveryBoy(
+    boy: DeliveryBoy
+  ) {
+    const { error } = await supabase
+      .from("delivery_boys")
+      .update({
+        is_active: !boy.is_active,
+      })
+      .eq("id", boy.id);
+
+    if (error) {
+      setMessage(`❌ ${error.message}`);
+      return;
+    }
+
+    if (shop) {
+      await loadDeliveryBoys(shop.id);
+    }
+  }
+
+  // --------------------------------------------------
+  // ACCEPT CUSTOMER ORDER
+  // IMPORTANT:
+  // DO NOT OVERWRITE CUSTOMER PAYMENT SELECTION
+  // --------------------------------------------------
+
+  async function acceptCustomerOrder(
+    request: CustomerRequest
+  ) {
+    const amount = Number(
+      orderAmounts[String(request.id)] ||
+        request.estimated_amount ||
+        0
     );
 
-    setMessage("✅ Shop settings successfully save ho gayi.");
-    setSavingSettings(false);
-  };
+    if (Number.isNaN(amount) || amount <= 0) {
+      setMessage(
+        "Final order amount valid enter karein."
+      );
+      return;
+    }
 
-  // -----------------------------
+    const existingPaymentMethod =
+      request.payment_method;
+
+    let paymentStatus =
+      request.payment_status ||
+      "not_selected";
+
+    // Customer ne Cash pehle hi select kiya tha
+    if (existingPaymentMethod === "cash") {
+      paymentStatus = "cash_pending";
+    }
+
+    // Customer ne UPI select kiya tha
+    if (existingPaymentMethod === "upi") {
+      paymentStatus = "upi_pending";
+    }
+
+    const updateData: Record<string, any> = {
+      status: "order_confirmed",
+      order_amount: amount,
+      shopkeeper_confirmed_at:
+        new Date().toISOString(),
+
+      payment_method:
+        existingPaymentMethod,
+
+      payment_status:
+        paymentStatus,
+    };
+
+    // COD ke liye cash tracking
+    if (existingPaymentMethod === "cash") {
+      updateData.cash_amount = amount;
+      updateData.cash_status = "pending";
+    }
+
+    const { error } = await supabase
+      .from("customer_requests")
+      .update(updateData)
+      .eq("id", request.id);
+
+    if (error) {
+      console.error(
+        "ACCEPT ORDER ERROR:",
+        error
+      );
+
+      setMessage(
+        `❌ Order accept nahi hua: ${error.message}`
+      );
+
+      return;
+    }
+
+    setMessage(
+      existingPaymentMethod === "cash"
+        ? `✅ Order confirmed. Cash ₹${amount.toFixed(
+            2
+          )} delivery par collect hoga.`
+        : "✅ Order successfully confirmed."
+    );
+
+    if (shop) {
+      await loadRequests(shop.id);
+    }
+  }
+
+  // --------------------------------------------------
+  // ORDER STAGE
+  // --------------------------------------------------
+
+  async function updateOrderStage(
+    request: CustomerRequest,
+    newStatus: string
+  ) {
+    const updateData: Record<string, any> = {
+      status: newStatus,
+    };
+
+    if (newStatus === "out_for_delivery") {
+      updateData.out_for_delivery_at =
+        new Date().toISOString();
+    }
+
+    if (newStatus === "delivered") {
+      updateData.delivered_at =
+        new Date().toISOString();
+    }
+
+    const { error } = await supabase
+      .from("customer_requests")
+      .update(updateData)
+      .eq("id", request.id);
+
+    if (error) {
+      console.error(
+        "STATUS UPDATE ERROR:",
+        error
+      );
+
+      setMessage(
+        `❌ Status update nahi hua: ${error.message}`
+      );
+
+      return;
+    }
+
+    setMessage(
+      `Order status: ${STATUS_LABELS[newStatus] || newStatus}`
+    );
+
+    if (shop) {
+      await loadRequests(shop.id);
+    }
+  }
+
+  // --------------------------------------------------
+  // ASSIGN DELIVERY BOY
+  // --------------------------------------------------
+
+  async function assignDeliveryBoy(
+    request: CustomerRequest
+  ) {
+    const selectedId =
+      selectedDeliveryBoys[
+        String(request.id)
+      ];
+
+    if (!selectedId) {
+      setMessage(
+        "Pehle Delivery Boy select karein."
+      );
+      return;
+    }
+
+    const boy = deliveryBoys.find(
+      (item) =>
+        String(item.id) ===
+        String(selectedId)
+    );
+
+    if (!boy) {
+      setMessage(
+        "Delivery Boy nahi mila."
+      );
+      return;
+    }
+
+    const { error } = await supabase
+      .from("customer_requests")
+      .update({
+        delivery_boy_id: boy.id,
+        delivery_boy_name: boy.name,
+        delivery_boy_phone: boy.phone,
+        delivery_status: "assigned",
+        delivery_assigned_at:
+          new Date().toISOString(),
+
+        status: "handed_to_delivery",
+      })
+      .eq("id", request.id);
+
+    if (error) {
+      console.error(
+        "ASSIGN DELIVERY ERROR:",
+        error
+      );
+
+      setMessage(
+        `❌ Delivery Boy assign nahi hua: ${error.message}`
+      );
+
+      return;
+    }
+
+    setMessage(
+      `🛵 ${boy.name} ko order de diya gaya.`
+    );
+
+    if (shop) {
+      await loadRequests(shop.id);
+    }
+  }
+
+  // --------------------------------------------------
+  // MARK PAYMENT RECEIVED BY SHOP
+  // --------------------------------------------------
+
+  async function markPaymentReceived(
+    request: CustomerRequest
+  ) {
+    const { error } = await supabase
+      .from("customer_requests")
+      .update({
+        payment_status: "paid",
+        paid_at:
+          new Date().toISOString(),
+
+        cash_status:
+          request.payment_method === "cash"
+            ? "received"
+            : request.cash_status,
+      })
+      .eq("id", request.id);
+
+    if (error) {
+      console.error(
+        "PAYMENT RECEIVED ERROR:",
+        error
+      );
+
+      setMessage(
+        `❌ Payment update nahi hua: ${error.message}`
+      );
+
+      return;
+    }
+
+    setMessage(
+      `✅ ₹${Number(
+        request.order_amount || 0
+      ).toFixed(2)} payment received mark ho gaya.`
+    );
+
+    if (shop) {
+      await loadRequests(shop.id);
+    }
+  }
+
+  // --------------------------------------------------
+  // CASH HANDED TO SHOP
+  // --------------------------------------------------
+
+  async function confirmCashFromDeliveryBoy(
+    request: CustomerRequest
+  ) {
+    if (!request.cash_received_at) {
+      setMessage(
+        "Delivery Boy ne abhi cash receive confirm nahi kiya."
+      );
+      return;
+    }
+
+    const { error } = await supabase
+      .from("customer_requests")
+      .update({
+        cash_handed_to_shop: true,
+        cash_handed_to_shop_at:
+          new Date().toISOString(),
+        payment_status: "paid",
+        paid_at:
+          new Date().toISOString(),
+        cash_status: "handed_to_shop",
+      })
+      .eq("id", request.id);
+
+    if (error) {
+      console.error(
+        "CASH HANDOVER ERROR:",
+        error
+      );
+
+      setMessage(
+        `❌ Cash confirmation nahi hua: ${error.message}`
+      );
+
+      return;
+    }
+
+    setMessage(
+      `✅ Delivery Boy se ₹${Number(
+        request.cash_amount ||
+          request.order_amount ||
+          0
+      ).toFixed(2)} cash receive confirm ho gaya.`
+    );
+
+    if (shop) {
+      await loadRequests(shop.id);
+    }
+  }
+
+  // --------------------------------------------------
+  // PAYMENT TEXT
+  // --------------------------------------------------
+
+  function getPaymentText(
+    request: CustomerRequest
+  ) {
+    if (request.payment_method === "cash") {
+      if (
+        request.cash_handed_to_shop
+      ) {
+        return "🟢 Cash Shopkeeper Ko Received";
+      }
+
+      if (request.cash_received_at) {
+        return "🟡 Cash Delivery Boy Ke Paas";
+      }
+
+      return "🔴 Cash Pending";
+    }
+
+    if (
+      request.payment_method === "upi"
+    ) {
+      if (
+        request.payment_status ===
+        "paid"
+      ) {
+        return "🟢 UPI Payment Received";
+      }
+
+      if (
+        request.payment_status ===
+        "customer_claimed"
+      ) {
+        return "🟡 UPI Verification Pending";
+      }
+
+      return "🔴 UPI Payment Pending";
+    }
+
+    return "⚠️ Payment Not Selected";
+  }
+
+  // --------------------------------------------------
   // LOADING
-  // -----------------------------
+  // --------------------------------------------------
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-gray-50 px-4 py-10">
-        <div className="mx-auto max-w-4xl rounded-3xl bg-white p-10 text-center shadow-lg">
-          <p className="text-lg font-semibold text-gray-700">
-            ⏳ Shop dashboard load ho raha hai...
-          </p>
+      <main className="min-h-screen bg-gray-50 p-6">
+        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-8 text-center">
+          Dashboard loading...
         </div>
       </main>
     );
   }
 
-  // -----------------------------
-  // NO SHOP
-  // -----------------------------
   if (!shop) {
     return (
-      <main className="min-h-screen bg-gray-50 px-4 py-10">
-        <div className="mx-auto max-w-2xl rounded-3xl bg-white p-8 text-center shadow-lg">
-          <h1 className="text-2xl font-bold text-gray-900">
-            🏪 GaonSathi Shop Dashboard
+      <main className="min-h-screen bg-gray-50 p-6">
+        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-8">
+          <h1 className="text-xl font-bold">
+            Shop Dashboard
           </h1>
 
-          <p className="mt-4 text-gray-600">
-            {message || "Approved shop nahi mili."}
+          <p className="mt-3 text-red-600">
+            {message ||
+              "Shop information available nahi hai."}
           </p>
         </div>
       </main>
     );
   }
 
-  // -----------------------------
-  // DASHBOARD UI
-  // -----------------------------
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
+
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="mx-auto max-w-5xl">
+    <main className="min-h-screen bg-gray-50 pb-16">
+      {/* HEADER */}
 
-        {/* HEADER */}
-        <div className="rounded-3xl bg-white p-6 shadow-lg">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <header className="border-b bg-white">
+        <div className="mx-auto max-w-6xl px-4 py-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-green-600">
-                ● SHOP ACTIVE
-              </p>
-
-              <h1 className="mt-1 text-3xl font-bold text-gray-900">
-                🏪 {shop.name}
+              <h1 className="text-2xl font-bold text-green-700">
+                {shop.name}
               </h1>
 
-              <p className="mt-2 text-gray-600">
-                👤 {shop.owner_name || "Shopkeeper"}
-              </p>
-
-              <p className="text-gray-600">
-                📍 {shop.village || "Village"}
+              <p className="text-sm text-gray-500">
+                Shopkeeper Dashboard
               </p>
             </div>
 
-            <button
-              onClick={loadShop}
-              className="rounded-xl border border-gray-300 bg-white px-4 py-3 font-semibold text-gray-700 hover:bg-gray-100"
-            >
-              🔄 Refresh
-            </button>
+            <div className="flex gap-2">
+              <a
+                href="/delivery"
+                className="w-fit rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Delivery Panel
+              </a>
+
+              <a
+                href="/"
+                className="w-fit rounded-lg bg-gray-100 px-4 py-2 text-sm"
+              >
+                Home
+              </a>
+            </div>
           </div>
         </div>
+      </header>
 
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
         {/* MESSAGE */}
+
         {message && (
-          <div className="mt-5 rounded-2xl bg-white p-4 text-center font-semibold shadow-sm">
+          <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
             {message}
           </div>
         )}
 
-        {/* -------------------------------- */}
-        {/* SHOP SETTINGS */}
-        {/* -------------------------------- */}
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              ⚙️ Shop Settings
-            </h2>
+        {/* SHOP INFO */}
 
-            <p className="mt-1 text-sm text-gray-500">
-              Customer ko payment, pickup aur delivery ki information yahin se milegi.
+        <section className="rounded-2xl bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-bold">
+            🏪 Shop Information
+          </h2>
+
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <p>
+              <b>Owner:</b>{" "}
+              {shop.owner_name || "-"}
+            </p>
+
+            <p>
+              <b>Phone:</b>{" "}
+              {shop.phone || "-"}
+            </p>
+
+            <p>
+              <b>Village:</b>{" "}
+              {shop.village || "-"}
+            </p>
+
+            <p>
+              <b>Address:</b>{" "}
+              {shop.address || "-"}
             </p>
           </div>
+        </section>
 
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
+        {/* PRODUCTS */}
 
-            {/* PAYMENT METHOD */}
+        <section className="rounded-2xl bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-bold">
+            📦 Products
+          </h2>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <input
+              value={productForm.name}
+              onChange={(e) =>
+                setProductForm({
+                  ...productForm,
+                  name: e.target.value,
+                })
+              }
+              placeholder="Product name"
+              className="rounded-xl border px-4 py-3"
+            />
+
+            <input
+              value={productForm.category}
+              onChange={(e) =>
+                setProductForm({
+                  ...productForm,
+                  category: e.target.value,
+                })
+              }
+              placeholder="Category"
+              className="rounded-xl border px-4 py-3"
+            />
+
+            <input
+              type="number"
+              value={productForm.price}
+              onChange={(e) =>
+                setProductForm({
+                  ...productForm,
+                  price: e.target.value,
+                })
+              }
+              placeholder="Price ₹"
+              className="rounded-xl border px-4 py-3"
+            />
+          </div>
+
+          <button
+            onClick={addProduct}
+            disabled={saving}
+            className="mt-3 rounded-xl bg-green-600 px-5 py-3 font-semibold text-white"
+          >
+            {saving
+              ? "Adding..."
+              : "Add Product"}
+          </button>
+
+          <div className="mt-5 space-y-2">
+            {products.map((product) => (
+              <div
+                key={product.id}
+                className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <p className="font-semibold">
+                    {product.name}
+                  </p>
+
+                  <p className="text-sm text-gray-500">
+                    {product.category || "General"} • ₹
+                    {Number(
+                      product.price || 0
+                    ).toFixed(2)}
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      toggleProduct(product)
+                    }
+                    className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                      product.available
+                        ? "bg-green-100 text-green-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                  >
+                    {product.available
+                      ? "Available"
+                      : "Unavailable"}
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      deleteProduct(
+                        product.id
+                      )
+                    }
+                    className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* SETTINGS */}
+
+        <section className="rounded-2xl bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-bold">
+            ⚙️ Shop Settings
+          </h2>
+
+          <p className="mt-1 text-sm text-gray-500">
+            Payment, pickup aur home delivery settings.
+          </p>
+
+          <div className="mt-5 space-y-4">
+            {/* PAYMENT */}
+
             <div>
-              <label className="mb-2 block font-semibold text-gray-800">
-                💳 Payment Method
+              <label className="mb-2 block text-sm font-semibold">
+                Payment Method
               </label>
 
               <select
@@ -466,468 +1209,773 @@ export default function ShopDashboard() {
                 onChange={(e) =>
                   setSettings({
                     ...settings,
-                    payment_method: e.target.value,
+                    payment_method:
+                      e.target.value,
                   })
                 }
-                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 outline-none focus:border-black"
+                className="w-full rounded-xl border px-4 py-3"
               >
-                <option value="Cash">Cash</option>
-                <option value="UPI">UPI</option>
-                <option value="Both">Cash + UPI</option>
+                <option value="cash">
+                  Cash
+                </option>
+
+                <option value="upi">
+                  UPI
+                </option>
+
+                <option value="both">
+                  Cash + UPI
+                </option>
               </select>
             </div>
 
-            {/* UPI ID */}
-            <div>
-              <label className="mb-2 block font-semibold text-gray-800">
-                📱 UPI ID
-              </label>
+            {/* UPI */}
 
-              <input
-                type="text"
-                value={settings.upi_id}
-                disabled={settings.payment_method === "Cash"}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    upi_id: e.target.value,
-                  })
-                }
-                placeholder="Example: shopname@upi"
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black disabled:bg-gray-100"
-              />
+            {settings.payment_method !==
+              "cash" && (
+              <div>
+                <label className="mb-2 block text-sm font-semibold">
+                  UPI ID
+                </label>
 
-              {settings.payment_method !== "Cash" && (
-                <p className="mt-1 text-xs text-gray-500">
-                  Customer ko payment ke liye ye UPI ID dikhegi.
-                </p>
-              )}
-            </div>
+                <input
+                  value={settings.upi_id}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      upi_id:
+                        e.target.value,
+                    })
+                  }
+                  placeholder="example@upi"
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+            )}
 
-            {/* HOME DELIVERY */}
-            <div className="rounded-2xl border border-gray-200 p-4">
+            {/* DELIVERY */}
+
+            <div className="rounded-xl border p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-bold text-gray-900">
-                    🚚 Home Delivery
+                  <p className="font-semibold">
+                    Home Delivery
                   </p>
 
-                  <p className="text-sm text-gray-500">
-                    Kya aap ghar tak samaan deliver karte hain?
+                  <p className="text-xs text-gray-500">
+                    Customer ke ghar delivery.
                   </p>
                 </div>
 
                 <button
-                  type="button"
                   onClick={() =>
                     setSettings({
                       ...settings,
-                      home_delivery: !settings.home_delivery,
+                      home_delivery:
+                        !settings.home_delivery,
                     })
                   }
                   className={`rounded-full px-4 py-2 text-sm font-bold ${
                     settings.home_delivery
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-100 text-gray-600"
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-200 text-gray-700"
                   }`}
                 >
-                  {settings.home_delivery ? "ON" : "OFF"}
+                  {settings.home_delivery
+                    ? "ON"
+                    : "OFF"}
                 </button>
               </div>
             </div>
 
-            {/* PICKUP */}
-            <div className="rounded-2xl border border-gray-200 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-gray-900">
-                    📦 Store Pickup
-                  </p>
-
-                  <p className="text-sm text-gray-500">
-                    Customer shop se order collect kar sakta hai?
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSettings({
-                      ...settings,
-                      pickup_available: !settings.pickup_available,
-                    })
-                  }
-                  className={`rounded-full px-4 py-2 text-sm font-bold ${
-                    settings.pickup_available
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-100 text-gray-600"
-                  }`}
-                >
-                  {settings.pickup_available ? "ON" : "OFF"}
-                </button>
-              </div>
-            </div>
-
-            {/* DELIVERY DETAILS */}
             {settings.home_delivery && (
               <>
                 <div>
-                  <label className="mb-2 block font-semibold text-gray-800">
-                    ⏱️ Delivery Time
+                  <label className="mb-2 block text-sm font-semibold">
+                    Delivery Time
                   </label>
 
                   <input
-                    type="text"
-                    value={settings.delivery_time}
+                    value={
+                      settings.delivery_time
+                    }
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        delivery_time: e.target.value,
+                        delivery_time:
+                          e.target.value,
                       })
                     }
-                    placeholder="Example: 30–60 minutes"
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
+                    placeholder="30–60 min"
+                    className="w-full rounded-xl border px-4 py-3"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-2 block font-semibold text-gray-800">
-                    💰 Delivery Fee
+                  <label className="mb-2 block text-sm font-semibold">
+                    Delivery Fee
                   </label>
 
                   <input
                     type="number"
-                    min="0"
-                    value={settings.delivery_fee}
+                    value={
+                      settings.delivery_fee
+                    }
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        delivery_fee: e.target.value,
+                        delivery_fee:
+                          e.target.value,
                       })
                     }
-                    placeholder="Example: 20"
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
+                    placeholder="20"
+                    className="w-full rounded-xl border px-4 py-3"
                   />
                 </div>
               </>
             )}
-          </div>
 
-          {/* SAVE SETTINGS */}
-          <button
-            onClick={saveSettings}
-            disabled={savingSettings}
-            className="mt-6 w-full rounded-xl bg-black px-5 py-3 font-bold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {savingSettings
-              ? "⏳ Settings save ho rahi hain..."
-              : "💾 Save Shop Settings"}
-          </button>
-        </section>
+            {/* PICKUP */}
 
-        {/* -------------------------------- */}
-        {/* CUSTOMER REQUESTS */}
-        {/* -------------------------------- */}
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900">
-                📋 Customer Requests
-              </h2>
+            <div className="rounded-xl border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold">
+                    Pickup Available
+                  </p>
+                </div>
 
-              <p className="mt-1 text-sm text-gray-500">
-                Customers ki requirements yahan check karein.
-              </p>
+                <button
+                  onClick={() =>
+                    setSettings({
+                      ...settings,
+                      pickup_available:
+                        !settings.pickup_available,
+                    })
+                  }
+                  className={`rounded-full px-4 py-2 text-sm font-bold ${
+                    settings.pickup_available
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-200 text-gray-700"
+                  }`}
+                >
+                  {settings.pickup_available
+                    ? "ON"
+                    : "OFF"}
+                </button>
+              </div>
             </div>
 
             <button
-              onClick={() => loadRequests(shop.id)}
-              className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-100"
+              onClick={saveSettings}
+              disabled={savingSettings}
+              className="w-full rounded-xl bg-green-600 px-4 py-3 font-bold text-white"
             >
-              🔄 Refresh
+              {savingSettings
+                ? "Saving..."
+                : "Save Settings"}
             </button>
           </div>
-
-          {loadingRequests && (
-            <div className="mt-5 rounded-2xl bg-gray-50 p-6 text-center text-gray-500">
-              ⏳ Requests load ho rahi hain...
-            </div>
-          )}
-
-          {!loadingRequests && requests.length === 0 && (
-            <div className="mt-5 rounded-2xl bg-gray-50 p-6 text-center text-gray-500">
-              Abhi koi customer request nahi hai.
-            </div>
-          )}
-
-          {!loadingRequests && requests.length > 0 && (
-            <div className="mt-5 space-y-4">
-              {requests.map((request) => (
-                <div
-                  key={request.id}
-                  className="rounded-2xl border border-gray-200 p-5"
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500">
-                        Request #{request.id}
-                      </p>
-
-                      <h3 className="mt-1 text-lg font-bold text-gray-900">
-                        🛒 {request.requirement}
-                      </h3>
-
-                      <p className="mt-2 text-xs text-gray-400">
-                        🕒{" "}
-                        {new Date(request.created_at).toLocaleString("en-IN")}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${
-                        request.status === "pending"
-                          ? "bg-yellow-100 text-yellow-700"
-                          : request.status === "available"
-                          ? "bg-green-100 text-green-700"
-                          : request.status === "not_available"
-                          ? "bg-red-100 text-red-700"
-                          : "bg-blue-100 text-blue-700"
-                      }`}
-                    >
-                      {request.status === "pending"
-                        ? "⏳ Pending"
-                        : request.status === "available"
-                        ? "🟢 Available"
-                        : request.status === "not_available"
-                        ? "🔴 Not Available"
-                        : "🔵 Order Confirmed"}
-                    </span>
-                  </div>
-
-                  {request.status === "pending" && (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <button
-                        onClick={() =>
-                          updateRequestStatus(request.id, "available")
-                        }
-                        className="rounded-xl bg-green-600 px-4 py-3 font-bold text-white hover:bg-green-700"
-                      >
-                        🟢 Samaan Available
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          updateRequestStatus(request.id, "not_available")
-                        }
-                        className="rounded-xl bg-red-600 px-4 py-3 font-bold text-white hover:bg-red-700"
-                      >
-                        🔴 Not Available
-                      </button>
-                    </div>
-                  )}
-
-                  {request.status === "available" && (
-                    <div className="mt-4 rounded-xl bg-green-50 p-4 text-sm text-green-700">
-                      🟢 Customer ko availability dikha di gayi hai.
-                      <br />
-                      Customer order confirm kar sakta hai.
-                    </div>
-                  )}
-
-                  {request.status === "not_available" && (
-                    <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">
-                      🔴 Customer ko bata diya gaya hai ki samaan available
-                      nahi hai.
-                    </div>
-                  )}
-
-                  {request.status === "order_confirmed" && (
-                    <div className="mt-4 rounded-xl bg-blue-50 p-4 text-sm text-blue-700">
-                      <p className="font-bold">
-                        ✅ Customer ne Order Confirm kar diya hai.
-                      </p>
-
-                      <p className="mt-2">
-                        📦 Next step:{" "}
-                        {shop.pickup_available && shop.home_delivery
-                          ? "Pickup / Home Delivery"
-                          : shop.home_delivery
-                          ? "Home Delivery"
-                          : "Store Pickup"}
-                      </p>
-
-                      {shop.home_delivery && (
-                        <p className="mt-1">
-                          🚚 Delivery:{" "}
-                          {shop.delivery_time || "Time shopkeeper se confirm hoga"}
-                        </p>
-                      )}
-
-                      {shop.home_delivery && (
-                        <p className="mt-1">
-                          💰 Delivery Fee: ₹{shop.delivery_fee || 0}
-                        </p>
-                      )}
-
-                      <p className="mt-1">
-                        💳 Payment: {shop.payment_method || "Cash"}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </section>
 
-        {/* -------------------------------- */}
-        {/* ADD PRODUCT */}
-        {/* -------------------------------- */}
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
-          <h2 className="text-2xl font-bold text-gray-900">
-            ➕ Add Product
+        {/* DELIVERY BOYS */}
+
+        <section className="rounded-2xl bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-bold">
+            🛵 Delivery Boys
           </h2>
 
           <p className="mt-1 text-sm text-gray-500">
-            Apni shop ke important products add karein.
+            Delivery Boy add karke orders assign karein.
           </p>
 
-          <form
-            onSubmit={handleSubmit}
-            className="mt-5 grid gap-4 md:grid-cols-3"
-          >
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <input
-              type="text"
-              value={form.name}
+              value={deliveryBoyForm.name}
               onChange={(e) =>
-                setForm({
-                  ...form,
+                setDeliveryBoyForm({
+                  ...deliveryBoyForm,
                   name: e.target.value,
                 })
               }
-              placeholder="Product name"
-              className="rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
+              placeholder="Delivery Boy Name"
+              className="rounded-xl border px-4 py-3"
             />
 
             <input
-              type="text"
-              value={form.category}
+              value={deliveryBoyForm.phone}
               onChange={(e) =>
-                setForm({
-                  ...form,
-                  category: e.target.value,
+                setDeliveryBoyForm({
+                  ...deliveryBoyForm,
+                  phone: e.target.value,
                 })
               }
-              placeholder="Category e.g. Grocery"
-              className="rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
+              placeholder="Mobile Number"
+              className="rounded-xl border px-4 py-3"
             />
+          </div>
 
-            <input
-              type="number"
-              value={form.price}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  price: e.target.value,
-                })
-              }
-              placeholder="Price ₹"
-              className="rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
-            />
+          <button
+            onClick={addDeliveryBoy}
+            className="mt-3 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white"
+          >
+            + Add Delivery Boy
+          </button>
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-xl bg-black px-4 py-3 font-bold text-white hover:bg-gray-800 disabled:opacity-60 md:col-span-3"
-            >
-              {saving ? "⏳ Product add ho raha hai..." : "➕ Add Product"}
-            </button>
-          </form>
+          <div className="mt-5 space-y-2">
+            {deliveryBoys.length === 0 ? (
+              <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
+                Abhi koi delivery boy add nahi hai.
+              </p>
+            ) : (
+              deliveryBoys.map((boy) => (
+                <div
+                  key={boy.id}
+                  className="flex items-center justify-between rounded-xl border p-4"
+                >
+                  <div>
+                    <p className="font-semibold">
+                      {boy.name}
+                    </p>
+
+                    <p className="text-sm text-gray-500">
+                      {boy.phone || "Phone not added"}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() =>
+                      toggleDeliveryBoy(boy)
+                    }
+                    className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                      boy.is_active
+                        ? "bg-green-100 text-green-700"
+                        : "bg-gray-200 text-gray-600"
+                    }`}
+                  >
+                    {boy.is_active
+                      ? "Active"
+                      : "Inactive"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </section>
 
-        {/* -------------------------------- */}
-        {/* PRODUCTS */}
-        {/* -------------------------------- */}
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow-lg">
+        {/* CUSTOMER REQUESTS */}
+
+        <section className="rounded-2xl bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">
-                📦 My Products
+              <h2 className="text-lg font-bold">
+                🛒 Customer Orders
               </h2>
 
-              <p className="mt-1 text-sm text-gray-500">
-                Products ki availability manage karein.
+              <p className="text-sm text-gray-500">
+                Customer requests aur orders.
               </p>
             </div>
 
-            <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-bold">
-              {products.length}
-            </span>
+            <button
+              onClick={() =>
+                shop && loadRequests(shop.id)
+              }
+              className="rounded-lg bg-gray-100 px-3 py-2 text-xs"
+            >
+              Refresh
+            </button>
           </div>
 
-          {products.length === 0 && (
-            <div className="mt-5 rounded-2xl bg-gray-50 p-6 text-center text-gray-500">
-              Abhi koi product add nahi hai.
+          {loadingRequests ? (
+            <div className="mt-5 rounded-xl bg-gray-50 p-5 text-sm">
+              Requests loading...
             </div>
-          )}
-
-          {products.length > 0 && (
-            <div className="mt-5 space-y-3">
-              {products.map((product) => (
+          ) : requests.length === 0 ? (
+            <div className="mt-5 rounded-xl bg-gray-50 p-5 text-sm text-gray-500">
+              Abhi koi customer request nahi hai.
+            </div>
+          ) : (
+            <div className="mt-5 space-y-5">
+              {requests.map((request) => (
                 <div
-                  key={product.id}
-                  className="flex flex-col gap-4 rounded-2xl border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  key={String(request.id)}
+                  className="rounded-2xl border p-4"
                 >
-                  <div>
-                    <h3 className="font-bold text-gray-900">
-                      🛒 {product.name}
-                    </h3>
+                  {/* HEADER */}
 
-                    {product.category && (
-                      <p className="text-sm text-gray-500">
-                        {product.category}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500">
+                        Request #
+                        {String(
+                          request.id
+                        ).slice(0, 8)}
                       </p>
-                    )}
 
-                    {product.price !== null && (
-                      <p className="mt-1 font-semibold text-gray-800">
-                        ₹{product.price}
-                      </p>
-                    )}
+                      <h3 className="text-lg font-bold">
+                        {request.product_name ||
+                          request.requirement}
+                      </h3>
+
+                      {request.product_name && (
+                        <p className="mt-1 text-sm text-gray-600">
+                          Quantity:{" "}
+                          {request.quantity || 1}
+                          {" × "}
+                          ₹
+                          {Number(
+                            request.unit_price || 0
+                          ).toFixed(2)}
+                        </p>
+                      )}
+                    </div>
+
+                    <span className="w-fit rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold">
+                      {STATUS_LABELS[
+                        request.status
+                      ] ||
+                        request.status}
+                    </span>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() =>
-                        toggleAvailability(
-                          product.id,
-                          product.available
-                        )
-                      }
-                      className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                        product.available
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-700"
-                      }`}
-                    >
-                      {product.available
-                        ? "🟢 Available"
-                        : "🔴 Unavailable"}
-                    </button>
+                  {/* ESTIMATED */}
 
-                    <button
-                      onClick={() => deleteProduct(product.id)}
-                      className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-200"
-                    >
-                      🗑️ Delete
-                    </button>
-                  </div>
+                  {request.product_name && (
+                    <div className="mt-4 rounded-xl bg-blue-50 p-3">
+                      <div className="flex justify-between text-sm">
+                        <span>
+                          Estimated Amount
+                        </span>
+
+                        <b>
+                          ₹
+                          {Number(
+                            request.estimated_amount ||
+                              0
+                          ).toFixed(2)}
+                        </b>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PENDING */}
+
+                  {request.status ===
+                    "pending" && (
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      <button
+                        onClick={() =>
+                          updateOrderStage(
+                            request,
+                            "available"
+                          )
+                        }
+                        className="rounded-xl bg-green-600 px-4 py-3 font-semibold text-white"
+                      >
+                        Samaan Available
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          updateOrderStage(
+                            request,
+                            "not_available"
+                          )
+                        }
+                        className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white"
+                      >
+                        Not Available
+                      </button>
+                    </div>
+                  )}
+
+                  {/* CUSTOMER CONFIRMED */}
+
+                  {request.status ===
+                    "customer_confirmed" && (
+                    <div className="mt-4 rounded-xl bg-purple-50 p-4">
+                      <p className="font-semibold text-purple-800">
+                        Customer ne order confirm
+                        kiya hai.
+                      </p>
+
+                      <div className="mt-3 flex gap-2">
+                        <input
+                          type="number"
+                          placeholder="Final Amount ₹"
+                          value={
+                            orderAmounts[
+                              String(
+                                request.id
+                              )
+                            ] || ""
+                          }
+                          onChange={(e) =>
+                            setOrderAmounts({
+                              ...orderAmounts,
+                              [String(
+                                request.id
+                              )]:
+                                e.target.value,
+                            })
+                          }
+                          className="flex-1 rounded-xl border px-4 py-3"
+                        />
+
+                        <button
+                          onClick={() =>
+                            acceptCustomerOrder(
+                              request
+                            )
+                          }
+                          className="rounded-xl bg-green-600 px-4 py-3 font-semibold text-white"
+                        >
+                          Confirm Order
+                        </button>
+                      </div>
+
+                      <p className="mt-2 text-xs text-gray-500">
+                        Customer ki selected payment
+                        method preserve rahegi.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ORDER CONFIRMED */}
+
+                  {[
+                    "order_confirmed",
+                    "preparing",
+                    "packed",
+                    "handed_to_delivery",
+                    "out_for_delivery",
+                    "delivered",
+                  ].includes(
+                    request.status
+                  ) && (
+                    <div className="mt-4 space-y-3">
+                      {/* ORDER SUMMARY */}
+
+                      <div className="rounded-xl bg-gray-50 p-4">
+                        <div className="flex justify-between">
+                          <span>
+                            Order Amount
+                          </span>
+
+                          <b className="text-lg">
+                            ₹
+                            {Number(
+                              request.order_amount ||
+                                0
+                            ).toFixed(2)}
+                          </b>
+                        </div>
+
+                        <div className="mt-2 flex justify-between">
+                          <span>
+                            Payment
+                          </span>
+
+                          <b>
+                            {getPaymentText(
+                              request
+                            )}
+                          </b>
+                        </div>
+
+                        {request.payment_method ===
+                          "cash" && (
+                          <p className="mt-2 text-sm text-orange-700">
+                            💵 COD Amount: ₹
+                            {Number(
+                              request.cash_amount ||
+                                request.order_amount ||
+                                0
+                            ).toFixed(2)}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* PREPARING */}
+
+                      {request.status ===
+                        "order_confirmed" && (
+                        <button
+                          onClick={() =>
+                            updateOrderStage(
+                              request,
+                              "preparing"
+                            )
+                          }
+                          className="w-full rounded-xl bg-orange-500 px-4 py-3 font-semibold text-white"
+                        >
+                          🧑‍🍳 Start Preparing
+                        </button>
+                      )}
+
+                      {/* PACKED */}
+
+                      {request.status ===
+                        "preparing" && (
+                        <button
+                          onClick={() =>
+                            updateOrderStage(
+                              request,
+                              "packed"
+                            )
+                          }
+                          className="w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white"
+                        >
+                          📦 Mark as Packed
+                        </button>
+                      )}
+
+                      {/* PACKED + DELIVERY */}
+
+                      {request.status ===
+                        "packed" &&
+                        shop.home_delivery && (
+                          <div className="rounded-xl bg-cyan-50 p-4">
+                            <p className="font-semibold">
+                              Delivery Boy Assign Karein
+                            </p>
+
+                            <select
+                              value={
+                                selectedDeliveryBoys[
+                                  String(
+                                    request.id
+                                  )
+                                ] || ""
+                              }
+                              onChange={(e) =>
+                                setSelectedDeliveryBoys(
+                                  {
+                                    ...selectedDeliveryBoys,
+                                    [String(
+                                      request.id
+                                    )]:
+                                      e.target
+                                        .value,
+                                  }
+                                )
+                              }
+                              className="mt-3 w-full rounded-xl border bg-white px-4 py-3"
+                            >
+                              <option value="">
+                                Select Delivery Boy
+                              </option>
+
+                              {deliveryBoys
+                                .filter(
+                                  (boy) =>
+                                    boy.is_active
+                                )
+                                .map((boy) => (
+                                  <option
+                                    key={
+                                      boy.id
+                                    }
+                                    value={
+                                      boy.id
+                                    }
+                                  >
+                                    {boy.name}
+                                    {boy.phone
+                                      ? ` - ${boy.phone}`
+                                      : ""}
+                                  </option>
+                                ))}
+                            </select>
+
+                            <button
+                              onClick={() =>
+                                assignDeliveryBoy(
+                                  request
+                                )
+                              }
+                              className="mt-3 w-full rounded-xl bg-cyan-600 px-4 py-3 font-semibold text-white"
+                            >
+                              🛵 Delivery Boy Ko De Do
+                            </button>
+                          </div>
+                        )}
+
+                      {/* PICKUP */}
+
+                      {request.status ===
+                        "packed" &&
+                        !shop.home_delivery && (
+                          <button
+                            onClick={() =>
+                              updateOrderStage(
+                                request,
+                                "delivered"
+                              )
+                            }
+                            className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white"
+                          >
+                            🛍️ Customer Ko De Diya
+                          </button>
+                        )}
+
+                      {/* DELIVERY BOY INFO */}
+
+                      {request.delivery_boy_name && (
+                        <div className="rounded-xl bg-blue-50 p-4">
+                          <p className="font-semibold">
+                            🛵 Delivery Boy
+                          </p>
+
+                          <p className="mt-1 text-sm">
+                            {request.delivery_boy_name}
+                          </p>
+
+                          {request.delivery_boy_phone && (
+                            <p className="text-sm text-gray-600">
+                              📞{" "}
+                              {
+                                request.delivery_boy_phone
+                              }
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* OUT FOR DELIVERY */}
+
+                      {request.status ===
+                        "handed_to_delivery" && (
+                        <button
+                          onClick={() =>
+                            updateOrderStage(
+                              request,
+                              "out_for_delivery"
+                            )
+                          }
+                          className="w-full rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white"
+                        >
+                          🛵 Out for Delivery
+                        </button>
+                      )}
+
+                      {/* DELIVERED */}
+
+                      {request.status ===
+                        "out_for_delivery" && (
+                        <div className="rounded-xl bg-yellow-50 p-4">
+                          <p className="font-semibold">
+                            Delivery Boy customer
+                            ke paas hai.
+                          </p>
+
+                          <p className="mt-1 text-sm text-gray-600">
+                            Cash payment Delivery Boy
+                            confirm karega.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* CASH RECEIVED */}
+
+                      {request.cash_received_at && (
+                        <div className="rounded-xl bg-green-50 p-4">
+                          <p className="font-semibold text-green-800">
+                            💵 Cash Received by Delivery
+                            Boy
+                          </p>
+
+                          <p className="mt-1">
+                            ₹
+                            {Number(
+                              request.cash_amount ||
+                                request.order_amount ||
+                                0
+                            ).toFixed(2)}
+                          </p>
+
+                          <p className="text-xs text-gray-500">
+                            Received by:{" "}
+                            {request.cash_received_by ||
+                              request.delivery_boy_name ||
+                              "Delivery Boy"}
+                          </p>
+
+                          {!request.cash_handed_to_shop && (
+                            <button
+                              onClick={() =>
+                                confirmCashFromDeliveryBoy(
+                                  request
+                                )
+                              }
+                              className="mt-3 w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white"
+                            >
+                              💰 Cash Shopkeeper Ko Mil Gaya
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* DELIVERED STATUS */}
+
+                      {request.status ===
+                        "delivered" && (
+                        <div className="rounded-xl bg-green-100 p-4">
+                          <p className="font-bold text-green-800">
+                            🏠 Order Delivered
+                          </p>
+
+                          <p className="mt-1 text-sm">
+                            Customer ko order successfully
+                            deliver ho gaya.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* PAYMENT RECEIVED MANUAL */}
+
+                      {request.payment_method ===
+                        "upi" &&
+                        request.payment_status !==
+                          "paid" && (
+                          <button
+                            onClick={() =>
+                              markPaymentReceived(
+                                request
+                              )
+                            }
+                            className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white"
+                          >
+                            ✅ UPI Payment Received
+                          </button>
+                        )}
+
+                      {/* PAYMENT PAID */}
+
+                      {request.payment_status ===
+                        "paid" && (
+                        <div className="rounded-xl bg-green-100 p-4 text-green-800">
+                          <p className="font-bold">
+                            ✅ Payment Received
+                          </p>
+
+                          <p className="text-sm">
+                            ₹
+                            {Number(
+                              request.order_amount ||
+                                0
+                            ).toFixed(2)}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </section>
-
       </div>
     </main>
   );
