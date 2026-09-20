@@ -24,6 +24,8 @@ type Shop = {
   delivery_time: string | null;
   delivery_fee: number | null;
   pickup_available: boolean;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 type DeliveryBoy = {
@@ -113,6 +115,8 @@ export default function ShopDashboard() {
     delivery_time: "",
     delivery_fee: "0",
     pickup_available: true,
+    latitude: "",
+    longitude: "",
   });
 
   const [orderAmounts, setOrderAmounts] = useState<
@@ -193,6 +197,14 @@ export default function ShopDashboard() {
         ),
         pickup_available:
           currentShop.pickup_available ?? true,
+        latitude:
+          currentShop.latitude != null
+            ? String(currentShop.latitude)
+            : "",
+        longitude:
+          currentShop.longitude != null
+            ? String(currentShop.longitude)
+            : "",
       });
 
       await Promise.all([
@@ -439,6 +451,58 @@ export default function ShopDashboard() {
   // SAVE SETTINGS
   // --------------------------------------------------
 
+  function getCurrentLocation() {
+    if (!navigator.geolocation) {
+      setMessage("❌ Is mobile/browser me location support nahi hai.");
+      return;
+    }
+
+    setMessage("📍 Location permission maang raha hai...");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+
+        setSettings((current) => ({
+          ...current,
+          latitude: String(latitude),
+          longitude: String(longitude),
+        }));
+
+        setMessage(
+          `📍 Location mil gayi: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}. Ab Save Settings dabayein.`
+        );
+      },
+      (error) => {
+        console.error("LOCATION ERROR:", error);
+        setMessage(
+          "❌ Location nahi mili. Mobile me GPS/Location ON karein aur browser permission Allow karein."
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  }
+
+  function openShopLocation() {
+    const lat = Number(settings.latitude);
+    const lng = Number(settings.longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setMessage("❌ Pehle shop ki location save karein.");
+      return;
+    }
+
+    window.open(
+      `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+      "_blank"
+    );
+  }
+
   async function saveSettings() {
     if (!shop) return;
 
@@ -482,6 +546,16 @@ export default function ShopDashboard() {
 
         pickup_available:
           settings.pickup_available,
+
+        latitude:
+          settings.latitude.trim()
+            ? Number(settings.latitude)
+            : null,
+
+        longitude:
+          settings.longitude.trim()
+            ? Number(settings.longitude)
+            : null,
       })
       .eq("id", shop.id)
       .select(`
@@ -496,7 +570,9 @@ export default function ShopDashboard() {
         home_delivery,
         delivery_time,
         delivery_fee,
-        pickup_available
+        pickup_available,
+        latitude,
+        longitude
       `)
       .single();
 
@@ -524,6 +600,14 @@ export default function ShopDashboard() {
       ),
       pickup_available:
         data.pickup_available ?? true,
+      latitude:
+        data.latitude != null
+          ? String(data.latitude)
+          : "",
+      longitude:
+        data.longitude != null
+          ? String(data.longitude)
+          : "",
     });
 
     setMessage("✅ Settings successfully saved.");
@@ -535,54 +619,40 @@ export default function ShopDashboard() {
   // --------------------------------------------------
 
   async function addDeliveryBoy() {
-    if (!shop) {
-      setMessage("❌ Shop information nahi mili.");
-      return;
-    }
+    if (!shop) return;
 
-    const name = deliveryBoyForm.name.trim();
-    const phone = deliveryBoyForm.phone.trim();
+    const name =
+      deliveryBoyForm.name.trim();
+
+    const phone =
+      deliveryBoyForm.phone.trim();
 
     if (!name) {
-      setMessage("❌ Delivery Boy ka naam likhiye.");
+      setMessage("Delivery Boy ka naam likhiye.");
       return;
     }
 
-    setSaving(true);
-    setMessage("");
-
-    const payload = {
-      shop_id: Number(shop.id),
-      name,
-      phone: phone || null,
-      is_active: true,
-    };
-
-    console.log("ADDING DELIVERY BOY:", payload);
-
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("delivery_boys")
-      .insert(payload)
-      .select("id, shop_id, name, phone, is_active")
-      .single();
+      .insert({
+        shop_id: shop.id,
+        name,
+        phone: phone || null,
+        is_active: true,
+      });
 
     if (error) {
-      console.error("ADD DELIVERY BOY ERROR MESSAGE:", error.message);
-      console.error("ADD DELIVERY BOY ERROR DETAILS:", error.details);
-      console.error("ADD DELIVERY BOY ERROR HINT:", error.hint);
-      console.error("ADD DELIVERY BOY ERROR CODE:", error.code);
-
-      setMessage(
-        `❌ Delivery Boy add nahi hua: ${
-          error.message || "Database error"
-        }`
+      console.error(
+        "ADD DELIVERY BOY ERROR:",
+        error
       );
 
-      setSaving(false);
+      setMessage(
+        `❌ Delivery Boy add nahi hua: ${error.message}`
+      );
+
       return;
     }
-
-    console.log("DELIVERY BOY ADDED:", data);
 
     setDeliveryBoyForm({
       name: "",
@@ -591,9 +661,9 @@ export default function ShopDashboard() {
 
     await loadDeliveryBoys(shop.id);
 
-    setMessage("✅ Delivery Boy successfully add ho gaya.");
-
-    setSaving(false);
+    setMessage(
+      "✅ Delivery Boy successfully add ho gaya."
+    );
   }
 
   // --------------------------------------------------
@@ -1020,21 +1090,12 @@ export default function ShopDashboard() {
               </p>
             </div>
 
-            <div className="flex gap-2">
-              <a
-                href="/delivery"
-                className="w-fit rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
-              >
-                Delivery Panel
-              </a>
-
-              <a
-                href="/"
-                className="w-fit rounded-lg bg-gray-100 px-4 py-2 text-sm"
-              >
-                Home
-              </a>
-            </div>
+            <a
+              href="/"
+              className="w-fit rounded-lg bg-gray-100 px-4 py-2 text-sm"
+            >
+              Home
+            </a>
           </div>
         </div>
       </header>
@@ -1197,6 +1258,65 @@ export default function ShopDashboard() {
           </p>
 
           <div className="mt-5 space-y-4">
+            {/* SHOP LOCATION */}
+
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold">📍 Shop Location</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Customer ko map par aapki exact shop location dikhane ke liye.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={getCurrentLocation}
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white sm:w-auto"
+                >
+                  📍 Use Current Location
+                </button>
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <input
+                  value={settings.latitude}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      latitude: e.target.value,
+                    })
+                  }
+                  placeholder="Latitude"
+                  inputMode="decimal"
+                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                />
+
+                <input
+                  value={settings.longitude}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      longitude: e.target.value,
+                    })
+                  }
+                  placeholder="Longitude"
+                  inputMode="decimal"
+                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                />
+              </div>
+
+              {settings.latitude && settings.longitude && (
+                <button
+                  type="button"
+                  onClick={openShopLocation}
+                  className="mt-3 w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm font-semibold text-blue-700"
+                >
+                  🗺️ Check Shop Location in Google Maps
+                </button>
+              )}
+            </div>
+
             {/* PAYMENT */}
 
             <div>
