@@ -16,27 +16,23 @@ type Order = {
   requirement: string;
   status: string;
   created_at: string;
-
   shop_id: number;
-
   order_amount: number | null;
   payment_method: string | null;
   payment_status: string | null;
-
   delivery_boy_id: number | null;
   delivery_boy_name: string | null;
   delivery_boy_phone: string | null;
-
   delivery_status: string | null;
   delivery_assigned_at: string | null;
   out_for_delivery_at: string | null;
   delivered_at: string | null;
-
   cash_amount: number | null;
   cash_status: string | null;
   cash_received_at: string | null;
   cash_received_by: string | null;
   cash_handed_to_shop: boolean | null;
+  cash_handed_to_shop_at?: string | null;
 };
 
 type Shop = {
@@ -56,9 +52,6 @@ export default function DeliveryPage() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [message, setMessage] = useState("");
 
-  // ------------------------------------------
-  // LOAD DELIVERY BOYS
-  // ------------------------------------------
   async function loadDeliveryBoys() {
     const { data, error } = await supabase
       .from("delivery_boys")
@@ -69,12 +62,12 @@ export default function DeliveryPage() {
     if (error) {
       console.error("DELIVERY BOYS ERROR:", error);
       setMessage("Delivery boys load nahi ho rahe.");
+      setLoading(false);
       return;
     }
 
     setBoys(data || []);
 
-    // Previously selected boy
     const saved = localStorage.getItem("gaonsathi_delivery_boy_id");
 
     if (saved && data?.some((b) => String(b.id) === saved)) {
@@ -90,9 +83,6 @@ export default function DeliveryPage() {
     setLoading(false);
   }
 
-  // ------------------------------------------
-  // LOAD ORDERS
-  // ------------------------------------------
   async function loadOrders(boyId: number) {
     setLoadingOrders(true);
 
@@ -118,7 +108,8 @@ export default function DeliveryPage() {
         cash_status,
         cash_received_at,
         cash_received_by,
-        cash_handed_to_shop
+        cash_handed_to_shop,
+        cash_handed_to_shop_at
       `)
       .eq("delivery_boy_id", boyId)
       .in("status", [
@@ -136,9 +127,8 @@ export default function DeliveryPage() {
       return;
     }
 
-    setOrders(data || []);
+    setOrders((data || []) as Order[]);
 
-    // Load shop information
     const shopIds = [
       ...new Set(
         (data || [])
@@ -160,21 +150,17 @@ export default function DeliveryPage() {
       });
 
       setShops(map);
+    } else {
+      setShops({});
     }
 
     setLoadingOrders(false);
   }
 
-  // ------------------------------------------
-  // INITIAL
-  // ------------------------------------------
   useEffect(() => {
     loadDeliveryBoys();
   }, []);
 
-  // ------------------------------------------
-  // BOY CHANGE
-  // ------------------------------------------
   useEffect(() => {
     if (!selectedBoy) return;
 
@@ -192,9 +178,6 @@ export default function DeliveryPage() {
     return () => clearInterval(timer);
   }, [selectedBoy]);
 
-  // ------------------------------------------
-  // START DELIVERY
-  // ------------------------------------------
   async function startDelivery(order: Order) {
     setMessage("");
 
@@ -208,31 +191,27 @@ export default function DeliveryPage() {
       .eq("id", order.id);
 
     if (error) {
-      console.error(error);
+      console.error("START DELIVERY ERROR:", error);
       setMessage("Delivery start nahi ho payi.");
       return;
     }
 
     setMessage("🚚 Order Out for Delivery ho gaya.");
 
-    if (selectedBoy) {
-      await loadOrders(selectedBoy);
-    }
+    if (selectedBoy) await loadOrders(selectedBoy);
   }
 
-  // ------------------------------------------
-  // CASH RECEIVED
-  // ------------------------------------------
   async function cashReceived(order: Order) {
-    if (
-      order.payment_method !== "cash" &&
-      order.payment_method !== "cod"
-    ) {
+    const method = String(order.payment_method || "").toLowerCase();
+
+    if (method !== "cash" && method !== "cod") {
+      setMessage("Ye Cash/COD order nahi hai.");
       return;
     }
 
-    const amount =
-      Number(order.cash_amount || order.order_amount || 0);
+    const amount = Number(
+      order.cash_amount || order.order_amount || 0
+    );
 
     if (amount <= 0) {
       setMessage("Order amount missing hai.");
@@ -247,34 +226,98 @@ export default function DeliveryPage() {
         cash_amount: amount,
         cash_status: "received",
         cash_received_at: new Date().toISOString(),
-        cash_received_by: boy?.name || order.delivery_boy_name || "",
+        cash_received_by:
+          boy?.name || order.delivery_boy_name || "",
       })
       .eq("id", order.id);
 
     if (error) {
-      console.error(error);
+      console.error("CASH RECEIVED ERROR:", error);
       setMessage("Cash status save nahi hua.");
       return;
     }
 
     setMessage(`💵 ₹${amount.toFixed(2)} cash receive ho gaya.`);
 
-    if (selectedBoy) {
-      await loadOrders(selectedBoy);
-    }
+    if (selectedBoy) await loadOrders(selectedBoy);
   }
 
-  // ------------------------------------------
-  // DELIVER ORDER
-  // ------------------------------------------
-  async function deliverOrder(order: Order) {
-    const isCash =
-      order.payment_method === "cash" ||
-      order.payment_method === "cod";
+  async function handoverCashToShop(order: Order) {
+    const method = String(order.payment_method || "").toLowerCase();
 
-    if (isCash && !order.cash_received_at) {
+    if (method !== "cash" && method !== "cod") {
+      setMessage("Ye Cash/COD order nahi hai.");
+      return;
+    }
+
+    if (!order.cash_received_at) {
       setMessage(
-        "⚠️ COD order hai. Pehle Cash Received confirm karein."
+        "⚠️ Pehle customer se Cash Received confirm karein."
+      );
+      return;
+    }
+
+    if (order.cash_handed_to_shop) {
+      setMessage("Cash already shopkeeper ko handover ho chuka hai.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `₹${Number(
+        order.cash_amount || order.order_amount || 0
+      ).toFixed(2)} cash shopkeeper ko handover kar diya hai?`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from("customer_requests")
+      .update({
+        cash_handed_to_shop: true,
+        cash_handed_to_shop_at: new Date().toISOString(),
+        cash_status: "handed_to_shop",
+      })
+      .eq("id", order.id);
+
+    if (error) {
+      console.error("CASH HANDOVER ERROR:", error);
+      setMessage(
+        "Cash handover status save nahi hua. Database column/policy check karein."
+      );
+      return;
+    }
+
+    setMessage("✅ Cash shopkeeper ko handover marked ho gaya.");
+
+    if (selectedBoy) await loadOrders(selectedBoy);
+  }
+
+  async function deliverOrder(order: Order) {
+    const method = String(order.payment_method || "").toLowerCase();
+    const isCash = method === "cash" || method === "cod";
+
+    if (isCash) {
+      if (!order.cash_received_at) {
+        setMessage(
+          "⚠️ COD order hai. Pehle Cash Received confirm karein."
+        );
+        return;
+      }
+
+      if (!order.cash_handed_to_shop) {
+        setMessage(
+          "⚠️ Pehle cash shopkeeper ko handover karke confirm karein."
+        );
+        return;
+      }
+    }
+
+    if (
+      method === "upi" &&
+      order.payment_status !== "paid"
+    ) {
+      setMessage(
+        "⚠️ UPI payment abhi shopkeeper ne received/paid confirm nahi kiya hai."
       );
       return;
     }
@@ -289,21 +332,16 @@ export default function DeliveryPage() {
       .eq("id", order.id);
 
     if (error) {
-      console.error(error);
+      console.error("DELIVER ORDER ERROR:", error);
       setMessage("Order delivered mark nahi ho paya.");
       return;
     }
 
     setMessage("✅ Order successfully delivered.");
 
-    if (selectedBoy) {
-      await loadOrders(selectedBoy);
-    }
+    if (selectedBoy) await loadOrders(selectedBoy);
   }
 
-  // ------------------------------------------
-  // PAYMENT TEXT
-  // ------------------------------------------
   function paymentText(order: Order) {
     const method = String(order.payment_method || "").toLowerCase();
 
@@ -334,20 +372,14 @@ export default function DeliveryPage() {
     return "Payment Not Selected";
   }
 
-  // ------------------------------------------
-  // STATUS TEXT
-  // ------------------------------------------
   function statusText(status: string) {
     switch (status) {
       case "handed_to_delivery":
         return "📦 Delivery Ke Liye Mila";
-
       case "out_for_delivery":
         return "🚚 Out for Delivery";
-
       case "delivered":
         return "✅ Delivered";
-
       default:
         return status;
     }
@@ -365,17 +397,13 @@ export default function DeliveryPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 pb-10">
-
-      {/* HEADER */}
       <header className="bg-green-700 text-white sticky top-0 z-50 shadow">
         <div className="max-w-3xl mx-auto px-4 py-4">
-
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold">
                 🚚 Delivery Panel
               </h1>
-
               <p className="text-xs text-green-100 mt-1">
                 GaonSathi Delivery Boy
               </p>
@@ -390,15 +418,11 @@ export default function DeliveryPage() {
               Refresh
             </button>
           </div>
-
         </div>
       </header>
 
       <div className="max-w-3xl mx-auto px-4 py-5">
-
-        {/* DELIVERY BOY SELECT */}
         <section className="bg-white rounded-2xl shadow-sm border p-4 mb-5">
-
           <label className="block text-sm font-semibold mb-2">
             Delivery Boy Select Karein
           </label>
@@ -430,24 +454,17 @@ export default function DeliveryPage() {
               ))}
             </select>
           )}
-
         </section>
 
-        {/* MESSAGE */}
         {message && (
           <div className="bg-green-50 border border-green-200 text-green-800 rounded-xl p-3 mb-5 text-sm font-medium">
             {message}
           </div>
         )}
 
-        {/* ORDERS */}
         <section>
-
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-bold">
-              My Deliveries
-            </h2>
-
+            <h2 className="text-lg font-bold">My Deliveries</h2>
             <span className="text-sm text-slate-500">
               {orders.length} Orders
             </span>
@@ -460,44 +477,51 @@ export default function DeliveryPage() {
           ) : orders.length === 0 ? (
             <div className="bg-white rounded-2xl border p-8 text-center">
               <div className="text-4xl mb-3">📦</div>
-
               <h3 className="font-semibold text-lg">
                 No Delivery Orders
               </h3>
-
               <p className="text-sm text-slate-500 mt-1">
-                Jab shopkeeper order assign karega,
-                yahan दिखाई देगा.
+                Jab shopkeeper order assign karega, yahan dikhai
+                dega.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-
               {orders.map((order) => {
                 const shop = shops[String(order.shop_id)];
 
-                const amount =
-                  Number(
-                    order.cash_amount ||
+                const amount = Number(
+                  order.cash_amount ||
                     order.order_amount ||
                     0
-                  );
+                );
+
+                const method = String(
+                  order.payment_method || ""
+                ).toLowerCase();
 
                 const isCash =
-                  order.payment_method === "cash" ||
-                  order.payment_method === "cod";
+                  method === "cash" || method === "cod";
+
+                const canDeliver =
+                  !isCash ||
+                  (!!order.cash_received_at &&
+                    !!order.cash_handed_to_shop);
+
+                const upiPaid =
+                  method === "upi" &&
+                  order.payment_status === "paid";
+
+                const canComplete =
+                  method === "upi" ? upiPaid : canDeliver;
 
                 return (
                   <article
                     key={String(order.id)}
                     className="bg-white border rounded-2xl shadow-sm overflow-hidden"
                   >
-
-                    {/* ORDER TOP */}
                     <div className="p-4 border-b">
-
                       <div className="flex items-start justify-between gap-3">
-
                         <div>
                           <p className="text-xs text-slate-500">
                             Request #{String(order.id).slice(0, 8)}
@@ -512,23 +536,19 @@ export default function DeliveryPage() {
                           className={`text-xs px-3 py-1.5 rounded-full font-semibold whitespace-nowrap ${
                             order.status === "delivered"
                               ? "bg-green-100 text-green-700"
-                              : order.status === "out_for_delivery"
+                              : order.status ===
+                                "out_for_delivery"
                               ? "bg-blue-100 text-blue-700"
                               : "bg-orange-100 text-orange-700"
                           }`}
                         >
                           {statusText(order.status)}
                         </span>
-
                       </div>
-
                     </div>
 
-                    {/* SHOP */}
                     <div className="p-4 space-y-3">
-
                       <div className="bg-slate-50 rounded-xl p-3">
-
                         <p className="text-xs text-slate-500 mb-1">
                           Pickup From
                         </p>
@@ -557,17 +577,13 @@ export default function DeliveryPage() {
                             {shop.village}
                           </p>
                         )}
-
                       </div>
 
-                      {/* AMOUNT */}
                       <div className="flex items-center justify-between border rounded-xl p-3">
-
                         <div>
                           <p className="text-xs text-slate-500">
                             Order Amount
                           </p>
-
                           <p className="text-xl font-bold">
                             ₹{amount.toFixed(2)}
                           </p>
@@ -577,33 +593,27 @@ export default function DeliveryPage() {
                           <p className="text-xs text-slate-500">
                             Payment
                           </p>
-
                           <p className="text-sm font-semibold">
                             {paymentText(order)}
                           </p>
                         </div>
-
                       </div>
 
-                      {/* CUSTOMER PAYMENT */}
                       <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
-
                         <p className="text-xs text-blue-600">
                           Payment Method
                         </p>
 
                         <p className="font-semibold text-blue-900">
-                          {order.payment_method === "cash" ||
-                          order.payment_method === "cod"
+                          {method === "cash" ||
+                          method === "cod"
                             ? "💵 Cash / COD"
-                            : order.payment_method === "upi"
+                            : method === "upi"
                             ? "📱 UPI"
                             : "❓ Not Selected"}
                         </p>
-
                       </div>
 
-                      {/* ACTIONS */}
                       {order.status === "handed_to_delivery" && (
                         <button
                           onClick={() => startDelivery(order)}
@@ -615,7 +625,6 @@ export default function DeliveryPage() {
 
                       {order.status === "out_for_delivery" && (
                         <div className="space-y-3">
-
                           {isCash && !order.cash_received_at && (
                             <button
                               onClick={() => cashReceived(order)}
@@ -628,32 +637,71 @@ export default function DeliveryPage() {
 
                           {isCash && order.cash_received_at && (
                             <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
-                              <strong>
-                                💵 Cash Received
-                              </strong>
-
+                              <strong>💵 Cash Received</strong>
                               <br />
+                              ₹{amount.toFixed(2)} cash delivery
+                              boy ke paas hai.
+                            </div>
+                          )}
 
-                              ₹{amount.toFixed(2)} cash
-                              delivery boy ke paas hai.
+                          {isCash &&
+                            order.cash_received_at &&
+                            !order.cash_handed_to_shop && (
+                              <button
+                                onClick={() =>
+                                  handoverCashToShop(order)
+                                }
+                                className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3.5 rounded-xl font-bold"
+                              >
+                                🏪 Cash Shopkeeper Ko Handover
+                              </button>
+                            )}
+
+                          {isCash &&
+                            order.cash_handed_to_shop && (
+                              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
+                                <strong>
+                                  ✅ Cash Shopkeeper Ko Handover Ho Gaya
+                                </strong>
+                              </div>
+                            )}
+
+                          {method === "upi" && (
+                            <div
+                              className={`rounded-xl p-3 border text-sm ${
+                                order.payment_status === "paid"
+                                  ? "bg-green-50 border-green-200 text-green-800"
+                                  : "bg-yellow-50 border-yellow-200 text-yellow-800"
+                              }`}
+                            >
+                              {order.payment_status === "paid"
+                                ? "✅ UPI payment shopkeeper ne received confirm kiya hai."
+                                : order.payment_status ===
+                                  "customer_claimed"
+                                ? "🟡 Customer ne payment paid bataya hai. Shopkeeper confirmation pending hai."
+                                : "⏳ UPI payment confirmation pending hai."}
                             </div>
                           )}
 
                           <button
                             onClick={() => deliverOrder(order)}
-                            className="w-full bg-green-600 hover:bg-green-700 text-white py-3.5 rounded-xl font-bold"
+                            disabled={!canComplete}
+                            className={`w-full text-white py-3.5 rounded-xl font-bold ${
+                              canComplete
+                                ? "bg-green-600 hover:bg-green-700"
+                                : "bg-slate-300 cursor-not-allowed"
+                            }`}
                           >
-                            ✅ Mark Delivered
+                            {canComplete
+                              ? "✅ Mark Delivered"
+                              : "🔒 Payment/Cash Complete Karein"}
                           </button>
-
                         </div>
                       )}
 
                       {order.status === "delivered" && (
                         <div className="space-y-3">
-
                           <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-
                             <p className="font-bold text-green-800">
                               ✅ Order Delivered
                             </p>
@@ -665,7 +713,6 @@ export default function DeliveryPage() {
                                 ).toLocaleString("en-IN")}
                               </p>
                             )}
-
                           </div>
 
                           {isCash && (
@@ -691,39 +738,28 @@ export default function DeliveryPage() {
                               </p>
                             </div>
                           )}
-
                         </div>
                       )}
-
                     </div>
-
                   </article>
                 );
               })}
-
             </div>
           )}
-
         </section>
 
-        {/* FLOW INFO */}
         <section className="mt-6 bg-white border rounded-2xl p-4">
-
-          <h3 className="font-bold mb-3">
-            Delivery Flow
-          </h3>
+          <h3 className="font-bold mb-3">Delivery Flow</h3>
 
           <div className="space-y-2 text-sm text-slate-600">
             <p>1️⃣ Shopkeeper → Delivery Boy ko order deta hai</p>
             <p>2️⃣ Delivery Boy → Start Delivery</p>
-            <p>3️⃣ COD hai → Cash Received</p>
-            <p>4️⃣ Customer ko order deliver</p>
-            <p>5️⃣ Delivery Boy cash shopkeeper ko deta hai</p>
-            <p>6️⃣ Shopkeeper → Cash Received Confirm</p>
+            <p>3️⃣ COD hai → Customer se Cash Received</p>
+            <p>4️⃣ Cash → Shopkeeper ko Handover</p>
+            <p>5️⃣ UPI → Shopkeeper payment received confirm kare</p>
+            <p>6️⃣ Sab complete → Mark Delivered</p>
           </div>
-
         </section>
-
       </div>
     </main>
   );

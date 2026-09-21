@@ -546,6 +546,15 @@ export default function ShopDashboard() {
       return;
     }
 
+    const needsUpi =
+      settings.payment_method === "upi" ||
+      settings.payment_method === "cash_upi";
+
+    if (needsUpi && !settings.upi_id.trim()) {
+      setMessage("UPI ID enter karein.");
+      return;
+    }
+
     setSavingSettings(true);
     setMessage("");
 
@@ -734,46 +743,40 @@ export default function ShopDashboard() {
     );
 
     if (Number.isNaN(amount) || amount <= 0) {
-      setMessage(
-        "Final order amount valid enter karein."
-      );
+      setMessage("Final order amount valid enter karein.");
       return;
     }
 
     const existingPaymentMethod =
-      request.payment_method;
+      String(request.payment_method || "").toLowerCase();
 
-    let paymentStatus =
-      request.payment_status ||
-      "not_selected";
-
-    // Customer ne Cash pehle hi select kiya tha
-    if (existingPaymentMethod === "cash") {
-      paymentStatus = "cash_pending";
+    if (existingPaymentMethod !== "cash" && existingPaymentMethod !== "upi") {
+      setMessage(
+        "⚠️ Customer ne payment method select nahi kiya. Customer se Cash ya UPI select karwayein."
+      );
+      return;
     }
 
-    // Customer ne UPI select kiya tha
-    if (existingPaymentMethod === "upi") {
-      paymentStatus = "upi_pending";
-    }
+    const paymentStatus =
+      existingPaymentMethod === "cash"
+        ? "cash_pending"
+        : "upi_pending";
 
     const updateData: Record<string, any> = {
       status: "order_confirmed",
       order_amount: amount,
-      shopkeeper_confirmed_at:
-        new Date().toISOString(),
-
-      payment_method:
-        existingPaymentMethod,
-
-      payment_status:
-        paymentStatus,
+      shopkeeper_confirmed_at: new Date().toISOString(),
+      payment_method: existingPaymentMethod,
+      payment_status: paymentStatus,
     };
 
-    // COD ke liye cash tracking
     if (existingPaymentMethod === "cash") {
       updateData.cash_amount = amount;
       updateData.cash_status = "pending";
+      updateData.cash_received_at = null;
+      updateData.cash_received_by = null;
+      updateData.cash_handed_to_shop = false;
+      updateData.cash_handed_to_shop_at = null;
     }
 
     const { error } = await supabase
@@ -782,24 +785,15 @@ export default function ShopDashboard() {
       .eq("id", request.id);
 
     if (error) {
-      console.error(
-        "ACCEPT ORDER ERROR:",
-        error
-      );
-
-      setMessage(
-        `❌ Order accept nahi hua: ${error.message}`
-      );
-
+      console.error("ACCEPT ORDER ERROR:", error);
+      setMessage(`❌ Order accept nahi hua: ${error.message}`);
       return;
     }
 
     setMessage(
       existingPaymentMethod === "cash"
-        ? `✅ Order confirmed. Cash ₹${amount.toFixed(
-            2
-          )} delivery par collect hoga.`
-        : "✅ Order successfully confirmed."
+        ? `✅ Order confirmed. Cash ₹${amount.toFixed(2)} delivery par collect hoga.`
+        : "✅ Order confirmed. Customer ko UPI payment complete karni hogi."
     );
 
     if (shop) {
@@ -815,9 +809,27 @@ export default function ShopDashboard() {
     request: CustomerRequest,
     newStatus: string
   ) {
+    if (newStatus === "out_for_delivery") {
+      if (!request.delivery_boy_id) {
+        setMessage("⚠️ Pehle Delivery Boy assign karein.");
+        return;
+      }
+
+      if (request.payment_method === "upi" && request.payment_status !== "paid") {
+        setMessage(
+          "⚠️ UPI payment abhi shopkeeper ne receive confirm nahi ki hai."
+        );
+        return;
+      }
+    }
+
     const updateData: Record<string, any> = {
       status: newStatus,
     };
+
+    if (newStatus === "out_for_delivery") {
+      updateData.delivery_status = "out_for_delivery";
+    }
 
     if (newStatus === "out_for_delivery") {
       updateData.out_for_delivery_at =
@@ -888,6 +900,13 @@ export default function ShopDashboard() {
       return;
     }
 
+    if (request.payment_method === "upi" && request.payment_status !== "paid") {
+      setMessage(
+        "⚠️ UPI order hai. Delivery Boy assign karne se pehle UPI payment receive confirm karein."
+      );
+      return;
+    }
+
     const { error } = await supabase
       .from("customer_requests")
       .update({
@@ -931,37 +950,34 @@ export default function ShopDashboard() {
   async function markPaymentReceived(
     request: CustomerRequest
   ) {
+    if (request.payment_method !== "upi") {
+      setMessage("Payment method UPI nahi hai.");
+      return;
+    }
+
+    if (request.payment_status !== "customer_claimed") {
+      setMessage(
+        "⚠️ Customer ne abhi UPI payment sent/claimed nahi ki hai."
+      );
+      return;
+    }
+
     const { error } = await supabase
       .from("customer_requests")
       .update({
         payment_status: "paid",
-        paid_at:
-          new Date().toISOString(),
-
-        cash_status:
-          request.payment_method === "cash"
-            ? "received"
-            : request.cash_status,
+        paid_at: new Date().toISOString(),
       })
       .eq("id", request.id);
 
     if (error) {
-      console.error(
-        "PAYMENT RECEIVED ERROR:",
-        error
-      );
-
-      setMessage(
-        `❌ Payment update nahi hua: ${error.message}`
-      );
-
+      console.error("PAYMENT RECEIVED ERROR:", error);
+      setMessage(`❌ Payment update nahi hua: ${error.message}`);
       return;
     }
 
     setMessage(
-      `✅ ₹${Number(
-        request.order_amount || 0
-      ).toFixed(2)} payment received mark ho gaya.`
+      `✅ ₹${Number(request.order_amount || 0).toFixed(2)} UPI payment received confirm ho gaya.`
     );
 
     if (shop) {
@@ -2097,8 +2113,8 @@ export default function ShopDashboard() {
 
                       {request.payment_method ===
                         "upi" &&
-                        request.payment_status !==
-                          "paid" && (
+                        request.payment_status ===
+                          "customer_claimed" && (
                           <button
                             onClick={() =>
                               markPaymentReceived(
@@ -2107,9 +2123,16 @@ export default function ShopDashboard() {
                             }
                             className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white"
                           >
-                            ✅ UPI Payment Received
+                            ✅ Customer Payment Received Confirm Karein
                           </button>
                         )}
+
+                      {request.payment_method === "upi" &&
+                        request.payment_status === "upi_pending" && (
+                        <div className="rounded-xl bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
+                          📱 Customer ko UPI payment complete karke <b>Payment Sent</b> confirm karna hoga.
+                        </div>
+                      )}
 
                       {/* PAYMENT PAID */}
 

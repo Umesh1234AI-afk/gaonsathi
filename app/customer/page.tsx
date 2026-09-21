@@ -575,6 +575,47 @@ export default function CustomerPage() {
   // PAYMENT
   // --------------------------------------------------
 
+  // Shopkeeper settings me payment_method ki value different
+  // format me aa sakti hai (cash / upi / cash_upi / Cash + UPI etc.)
+  // Isliye yahan ek hi jagah normalize kar rahe hain.
+  function getAllowedPaymentMethods(shop?: Shop) {
+    const raw = String(shop?.payment_method || "")
+      .trim()
+      .toLowerCase()
+      .replace(/-/g, "_");
+
+    if (!raw) {
+      return ["cash", "upi"] as ("cash" | "upi")[];
+    }
+
+    const isCash =
+      raw === "cash" ||
+      raw.includes("cash");
+
+    const isUpi =
+      raw === "upi" ||
+      raw.includes("upi");
+
+    const methods: ("cash" | "upi")[] = [];
+
+    if (isCash) methods.push("cash");
+    if (isUpi) methods.push("upi");
+
+    return methods.length
+      ? methods
+      : (["cash", "upi"] as ("cash" | "upi")[]);
+  }
+
+  function paymentMethodLabel(shop?: Shop) {
+    const methods = getAllowedPaymentMethods(shop);
+
+    if (methods.length === 1) {
+      return methods[0] === "cash" ? "Cash" : "UPI";
+    }
+
+    return "Cash + UPI";
+  }
+
   function openPayment(request: CustomerRequest) {
     setPaymentRequest(request);
   }
@@ -583,15 +624,37 @@ export default function CustomerPage() {
     request: CustomerRequest,
     method: "cash" | "upi"
   ) {
+    const allowedMethods = getAllowedPaymentMethods(request.shop);
+
+    if (!allowedMethods.includes(method)) {
+      setMessage(
+        `Is dukaan par ${paymentMethodLabel(
+          request.shop
+        )} payment available hai.`
+      );
+      return;
+    }
+
     setPaymentLoading(true);
+
+    const amount = Number(
+      request.order_amount ?? request.estimated_amount ?? 0
+    );
+
+    const updateData: Record<string, unknown> = {
+      payment_method: method,
+      payment_status:
+        method === "cash" ? "cash_pending" : "upi_pending",
+    };
+
+    if (method === "cash" && amount > 0) {
+      updateData.cash_amount = amount;
+      updateData.cash_status = "pending";
+    }
 
     const { error } = await supabase
       .from("customer_requests")
-      .update({
-        payment_method: method,
-        payment_status:
-          method === "cash" ? "cash_pending" : "upi_pending",
-      })
+      .update(updateData)
       .eq("id", request.id);
 
     if (error) {
@@ -602,10 +665,16 @@ export default function CustomerPage() {
     }
 
     setPaymentRequest(null);
+
+    setMessage(
+      method === "cash"
+        ? "✅ Cash payment select ho gaya. Delivery/Pickup par payment dena hai."
+        : "✅ UPI payment select ho gaya. Payment complete karke 'I Have Paid' dabayein."
+    );
+
     await loadRequests();
 
     if (method === "upi") {
-      const amount = Number(request.order_amount || 0);
       const upiId = request.shop?.upi_id;
 
       if (upiId && amount > 0) {
@@ -619,6 +688,10 @@ export default function CustomerPage() {
           )}&pn=${shopName}&am=${amount.toFixed(2)}&cu=INR`;
 
         window.location.href = upiUrl;
+      } else if (!upiId) {
+        setMessage(
+          "UPI select ho gaya, lekin shopkeeper ka UPI ID set nahi hai. Shopkeeper ko UPI ID save karni hogi."
+        );
       }
     }
 
@@ -659,19 +732,21 @@ export default function CustomerPage() {
   function paymentText(request: CustomerRequest) {
     switch (request.payment_status) {
       case "cash_pending":
-        return "Cash payment delivery/pickup par dena hai";
+        return "💵 Cash selected — delivery/pickup par cash dena hai";
 
       case "upi_pending":
-        return "UPI payment pending";
+        return "📱 UPI selected — payment pending";
 
       case "customer_claimed":
-        return "UPI payment customer ne paid bataya hai";
+        return "⏳ UPI payment customer ne paid bataya hai — shopkeeper verification pending";
 
       case "paid":
-        return "Payment Received";
+        return "✅ Payment Received";
 
       default:
-        return "Payment Not Selected";
+        return `Payment select karein (${paymentMethodLabel(
+          request.shop
+        )})`;
     }
   }
 
@@ -860,6 +935,29 @@ export default function CustomerPage() {
                               ).toFixed(2)}
                             </span>
                           </div>
+                        </div>
+                      )}
+
+                    {/* PAYMENT SUMMARY */}
+
+                    {request.status !== "pending" &&
+                      request.status !== "available" && (
+                        <div className="mb-3 rounded-xl border bg-white p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-semibold">
+                              Payment
+                            </span>
+
+                            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold">
+                              {request.payment_method
+                                ? request.payment_method.toUpperCase()
+                                : "Not Selected"}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-sm text-gray-600">
+                            {paymentText(request)}
+                          </p>
                         </div>
                       )}
 
@@ -1367,44 +1465,60 @@ export default function CustomerPage() {
               </button>
             </div>
 
+            <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm">
+              <p className="font-semibold">
+                Shop Payment Option: {paymentMethodLabel(
+                  paymentRequest.shop
+                )}
+              </p>
+
+              <p className="mt-1 text-xs text-gray-500">
+                Sirf shopkeeper ke enabled payment options hi yahan dikh rahe hain.
+              </p>
+            </div>
+
             <div className="space-y-3">
-              <button
-                onClick={() =>
-                  choosePayment(
-                    paymentRequest,
-                    "cash"
-                  )
-                }
-                disabled={paymentLoading}
-                className="w-full rounded-2xl border p-4 text-left hover:border-green-500"
-              >
-                <p className="font-bold">
-                  💵 Cash
-                </p>
+              {getAllowedPaymentMethods(paymentRequest.shop).includes(
+                "cash"
+              ) && (
+                <button
+                  onClick={() =>
+                    choosePayment(
+                      paymentRequest,
+                      "cash"
+                    )
+                  }
+                  disabled={paymentLoading}
+                  className="w-full rounded-2xl border border-green-200 bg-green-50 p-4 text-left hover:border-green-500 disabled:opacity-50"
+                >
+                  <p className="font-bold">💵 Cash</p>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  Delivery/Pickup ke time cash dein.
-                </p>
-              </button>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Delivery/Pickup ke time cash dein.
+                  </p>
+                </button>
+              )}
 
-              <button
-                onClick={() =>
-                  choosePayment(
-                    paymentRequest,
-                    "upi"
-                  )
-                }
-                disabled={paymentLoading}
-                className="w-full rounded-2xl border p-4 text-left hover:border-green-500"
-              >
-                <p className="font-bold">
-                  📱 UPI
-                </p>
+              {getAllowedPaymentMethods(paymentRequest.shop).includes(
+                "upi"
+              ) && (
+                <button
+                  onClick={() =>
+                    choosePayment(
+                      paymentRequest,
+                      "upi"
+                    )
+                  }
+                  disabled={paymentLoading}
+                  className="w-full rounded-2xl border border-blue-200 bg-blue-50 p-4 text-left hover:border-blue-500 disabled:opacity-50"
+                >
+                  <p className="font-bold">📱 UPI</p>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  UPI app se payment karein.
-                </p>
-              </button>
+                  <p className="mt-1 text-sm text-gray-500">
+                    UPI app se payment karein.
+                  </p>
+                </button>
+              )}
             </div>
 
             {paymentRequest.shop?.upi_id && (
@@ -1412,6 +1526,15 @@ export default function CustomerPage() {
                 UPI ID: {paymentRequest.shop.upi_id}
               </p>
             )}
+
+            {!paymentRequest.shop?.upi_id &&
+              getAllowedPaymentMethods(paymentRequest.shop).includes(
+                "upi"
+              ) && (
+                <p className="mt-4 rounded-xl bg-yellow-50 p-3 text-center text-xs text-yellow-800">
+                  ⚠️ UPI option enabled hai, lekin UPI ID save nahi hai.
+                </p>
+              )}
           </div>
         </div>
       )}
