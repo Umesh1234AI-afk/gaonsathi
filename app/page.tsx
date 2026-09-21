@@ -158,6 +158,13 @@ export default function Home() {
             </a>
 
             <a
+              href="/delivery"
+              className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-green-50 hover:text-green-700"
+            >
+              🚚 Delivery
+            </a>
+
+            <a
               href="/shop/login"
               className="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700"
             >
@@ -192,6 +199,14 @@ export default function Home() {
                 className="flex w-full items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm font-semibold"
               >
                 👤 Customer
+              </a>
+
+              <a
+                href="/delivery"
+                onClick={() => setMenuOpen(false)}
+                className="flex w-full items-center gap-3 rounded-xl bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-700"
+              >
+                🚚 Delivery Boy
               </a>
 
               <a
@@ -503,7 +518,7 @@ export default function Home() {
 
       {/* ================= MOBILE BOTTOM NAV ================= */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur sm:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-4">
+        <div className="mx-auto grid max-w-md grid-cols-5">
           <button
             onClick={() =>
               window.scrollTo({ top: 0, behavior: "smooth" })
@@ -536,6 +551,14 @@ export default function Home() {
           >
             <span className="text-lg">👤</span>
             Customer
+          </a>
+
+          <a
+            href="/delivery"
+            className="flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold text-orange-600"
+          >
+            <span className="text-lg">🚚</span>
+            Delivery
           </a>
         </div>
       </div>
